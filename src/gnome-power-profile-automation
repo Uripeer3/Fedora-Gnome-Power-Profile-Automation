@@ -1,0 +1,404 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Runtime controller for GNOME Power Mode Automation on Fedora.
+
+set -Eeuo pipefail
+
+APP="gnome-power-profile-automation"
+VERSION="1.0.0"
+CONFIG="/etc/${APP}.conf"
+STATE_DIR="/run/${APP}"
+STATE_FILE="${STATE_DIR}/last-state"
+
+UP_DEST="org.freedesktop.UPower"
+UP_PATH="/org/freedesktop/UPower"
+UP_IFACE="org.freedesktop.UPower"
+UP_DISPLAY_PATH="/org/freedesktop/UPower/devices/DisplayDevice"
+UP_DEVICE_IFACE="org.freedesktop.UPower.Device"
+
+PPD_DEST="net.hadess.PowerProfiles"
+PPD_PATH="/net/hadess/PowerProfiles"
+PPD_IFACE="net.hadess.PowerProfiles"
+
+DEFAULT_AC_PROFILE="performance"
+DEFAULT_BATTERY_PROFILE="balanced"
+DEFAULT_LOW_PROFILE="power-saver"
+DEFAULT_WARNING_LEVEL="3"
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]] && command -v tput >/dev/null 2>&1; then
+    BOLD="$(tput bold)"
+    BLUE="$(tput setaf 4)"
+    GREEN="$(tput setaf 2)"
+    YELLOW="$(tput setaf 3)"
+    RED="$(tput setaf 1)"
+    RESET="$(tput sgr0)"
+else
+    BOLD=""; BLUE=""; GREEN=""; YELLOW=""; RED=""; RESET=""
+fi
+
+say() { printf '%s\n' "$*"; }
+info() { printf '%sINFO:%s %s\n' "$BLUE" "$RESET" "$*"; }
+success() { printf '%sOK:%s %s\n' "$GREEN" "$RESET" "$*"; }
+warn() { printf '%sWARNING:%s %s\n' "$YELLOW" "$RESET" "$*" >&2; }
+die() { printf '%sERROR:%s %s\n' "$RED" "$RESET" "$*" >&2; logger -t "$APP" -- "ERROR: $*"; exit 1; }
+log() { logger -t "$APP" -- "$*"; }
+
+usage() {
+    cat <<EOF
+${BOLD}GNOME Power Mode Automation ${VERSION}${RESET}
+
+Usage:
+  sudo ${APP} <command> [options]
+
+Commands:
+  configure [--yes]   Open the guided policy configuration menu.
+  status              Show power state, target profile, and current GNOME mode.
+  apply               Force the configured policy once now.
+  monitor             Run the UPower event monitor (used by systemd).
+  help                Show this help text.
+
+The monitor preserves a temporary manual GNOME choice while the physical
+power state is unchanged. It applies policy again only on AC, battery, or
+low-battery state transitions.
+EOF
+}
+
+require_root() { (( EUID == 0 )) || die "Run this command with sudo."; }
+require_command() { command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
+
+validate_profile() {
+    case "$1" in
+        performance|balanced|power-saver) ;;
+        *) die "Unsupported profile: $1" ;;
+    esac
+}
+
+profile_label() {
+    case "$1" in
+        performance) printf 'Performance' ;;
+        balanced) printf 'Balanced' ;;
+        power-saver) printf 'Power Saver' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+profile_to_choice() {
+    case "$1" in
+        performance) printf 1 ;;
+        balanced) printf 2 ;;
+        power-saver) printf 3 ;;
+        *) printf 2 ;;
+    esac
+}
+
+choice_to_profile() {
+    case "$1" in
+        1) printf 'performance' ;;
+        2) printf 'balanced' ;;
+        3) printf 'power-saver' ;;
+        *) return 1 ;;
+    esac
+}
+
+warning_to_choice() {
+    case "$1" in
+        3) printf 1 ;;
+        4) printf 2 ;;
+        5) printf 3 ;;
+        *) printf 1 ;;
+    esac
+}
+
+choice_to_warning() {
+    case "$1" in
+        1) printf 3 ;;
+        2) printf 4 ;;
+        3) printf 5 ;;
+        *) return 1 ;;
+    esac
+}
+
+warning_label() {
+    case "$1" in
+        0) printf 'Unknown' ;;
+        1) printf 'None' ;;
+        2) printf 'Discharging (UPS only)' ;;
+        3) printf 'Low' ;;
+        4) printf 'Critical' ;;
+        5) printf 'Action' ;;
+        *) printf 'Unknown' ;;
+    esac
+}
+
+load_config() {
+    AC_PROFILE="$DEFAULT_AC_PROFILE"
+    BATTERY_PROFILE="$DEFAULT_BATTERY_PROFILE"
+    LOW_BATTERY_PROFILE="$DEFAULT_LOW_PROFILE"
+    LOW_BATTERY_WARNING_LEVEL="$DEFAULT_WARNING_LEVEL"
+
+    [[ -r "$CONFIG" ]] || return 0
+
+    # Created by the installer and expected to be root-owned.
+    # shellcheck disable=SC1090
+    source "$CONFIG"
+
+    validate_profile "$AC_PROFILE"
+    validate_profile "$BATTERY_PROFILE"
+    validate_profile "$LOW_BATTERY_PROFILE"
+    [[ "$LOW_BATTERY_WARNING_LEVEL" =~ ^[3-5]$ ]] || die "LOW_BATTERY_WARNING_LEVEL must be 3, 4, or 5"
+}
+
+write_config() {
+    local ac="$1" battery="$2" low="$3" warning="$4"
+    validate_profile "$ac"
+    validate_profile "$battery"
+    validate_profile "$low"
+    [[ "$warning" =~ ^[3-5]$ ]] || die "Invalid UPower warning level: $warning"
+
+    cat > "$CONFIG" <<EOF
+# ${APP} configuration
+# Allowed profile values: performance, balanced, power-saver
+# UPower warning levels: 3=Low, 4=Critical, 5=Action
+
+AC_PROFILE="${ac}"
+BATTERY_PROFILE="${battery}"
+LOW_BATTERY_PROFILE="${low}"
+LOW_BATTERY_WARNING_LEVEL=${warning}
+EOF
+    chmod 0644 "$CONFIG"
+}
+
+require_ppd_api() {
+    busctl --system get-property "$PPD_DEST" "$PPD_PATH" "$PPD_IFACE" ActiveProfile \
+        >/dev/null 2>&1 || die "Cannot reach the tuned-ppd Power Profiles API."
+}
+
+current_profile() {
+    busctl --system get-property "$PPD_DEST" "$PPD_PATH" "$PPD_IFACE" ActiveProfile \
+        | sed -n 's/.*"\([^" ]*\)".*/\1/p'
+}
+
+set_profile() {
+    validate_profile "$1"
+    busctl --system set-property "$PPD_DEST" "$PPD_PATH" "$PPD_IFACE" ActiveProfile s "$1"
+}
+
+on_battery() {
+    local value
+    value="$(busctl --system get-property "$UP_DEST" "$UP_PATH" "$UP_IFACE" OnBattery | awk '{print $2}')"
+    [[ "$value" == "true" ]]
+}
+
+warning_level() {
+    local value
+    value="$(busctl --system get-property "$UP_DEST" "$UP_DISPLAY_PATH" "$UP_DEVICE_IFACE" WarningLevel 2>/dev/null | awk '{print $2}' || true)"
+    [[ "$value" =~ ^[0-5]$ ]] && printf '%s\n' "$value" || printf '1\n'
+}
+
+battery_percentage() {
+    local value
+    value="$(busctl --system get-property "$UP_DEST" "$UP_DISPLAY_PATH" "$UP_DEVICE_IFACE" Percentage 2>/dev/null | awk '{print $2}' || true)"
+    [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] && printf '%s\n' "$value" || printf 'unknown\n'
+}
+
+desired_state() {
+    local warning
+    if ! on_battery; then
+        printf 'ac\n'
+        return
+    fi
+    warning="$(warning_level)"
+    if (( warning >= LOW_BATTERY_WARNING_LEVEL )); then
+        printf 'low-battery\n'
+    else
+        printf 'battery\n'
+    fi
+}
+
+profile_for_state() {
+    case "$1" in
+        ac) printf '%s\n' "$AC_PROFILE" ;;
+        battery) printf '%s\n' "$BATTERY_PROFILE" ;;
+        low-battery) printf '%s\n' "$LOW_BATTERY_PROFILE" ;;
+        *) die "Unknown state: $1" ;;
+    esac
+}
+
+apply_policy() {
+    local force="${1:-}" state target last_state=""
+    install -d -m 0755 "$STATE_DIR"
+    state="$(desired_state)"
+    target="$(profile_for_state "$state")"
+    [[ -r "$STATE_FILE" ]] && last_state="$(<"$STATE_FILE")"
+
+    # Avoid clobbering a manual GNOME choice while the physical state is unchanged.
+    if [[ "$force" != "--force" && "$state" == "$last_state" ]]; then
+        return 0
+    fi
+
+    set_profile "$target"
+    printf '%s\n' "$state" > "$STATE_FILE"
+    log "state=$state active-profile=$target"
+}
+
+show_status() {
+    local state target active warning percentage
+    load_config
+    require_ppd_api
+    state="$(desired_state)"
+    target="$(profile_for_state "$state")"
+    active="$(current_profile)"
+    warning="$(warning_level)"
+    percentage="$(battery_percentage)"
+
+    say "GNOME Power Mode Automation"
+    say "------------------------------------------------------------"
+    printf 'Detected power state : %s\n' "$state"
+    printf 'Battery percentage   : %s\n' "$percentage"
+    printf 'UPower warning level : %s (%s)\n' "$warning" "$(warning_label "$warning")"
+    printf 'Configured target    : %s\n' "$(profile_label "$target")"
+    printf 'Current GNOME mode   : %s\n' "$(profile_label "$active")"
+}
+
+SELECTED_PROFILE=""
+SELECTED_WARNING=""
+
+choose_profile() {
+    local heading="$1" explanation="$2" current="$3" default choice selected
+    default="$(profile_to_choice "$current")"
+
+    say
+    say "${BOLD}${heading}${RESET}"
+    say "$explanation"
+    say
+    say "  1) Performance"
+    say "     Maximum responsiveness for compiling, containers, and heavy work."
+    say "  2) Balanced"
+    say "     Recommended general-purpose mode with moderate power use."
+    say "  3) Power Saver"
+    say "     Prioritizes battery runtime, lower heat, and quieter operation."
+    say
+
+    while true; do
+        printf 'Choose 1, 2, or 3 [default: %s]: ' "$default"
+        read -r choice
+        choice="${choice:-$default}"
+        if selected="$(choice_to_profile "$choice")"; then
+            SELECTED_PROFILE="$selected"
+            return
+        fi
+        warn "Please enter 1, 2, or 3."
+    done
+}
+
+choose_warning() {
+    local current="$1" default choice selected
+    default="$(warning_to_choice "$current")"
+
+    say
+    say "${BOLD}When should low-battery mode activate?${RESET}"
+    say "This follows UPower's system warning state, not a fixed percentage."
+    say
+    say "  1) Low battery (recommended)"
+    say "  2) Critical battery"
+    say "  3) Final action state"
+    say
+
+    while true; do
+        printf 'Choose 1, 2, or 3 [default: %s]: ' "$default"
+        read -r choice
+        choice="${choice:-$default}"
+        if selected="$(choice_to_warning "$choice")"; then
+            SELECTED_WARNING="$selected"
+            return
+        fi
+        warn "Please enter 1, 2, or 3."
+    done
+}
+
+configure() {
+    local use_defaults=false ac battery low warning answer
+    while (( $# > 0 )); do
+        case "$1" in
+            -y|--yes) use_defaults=true ;;
+            -h|--help) say "Usage: sudo ${APP} configure [--yes]"; return ;;
+            *) die "Unknown configure option: $1" ;;
+        esac
+        shift
+    done
+
+    if "$use_defaults"; then
+        write_config "$DEFAULT_AC_PROFILE" "$DEFAULT_BATTERY_PROFILE" "$DEFAULT_LOW_PROFILE" "$DEFAULT_WARNING_LEVEL"
+        success "Configured recommended defaults in $CONFIG"
+        return
+    fi
+
+    [[ -t 0 ]] || die "Interactive configuration requires a terminal. Use configure --yes instead."
+    load_config
+    ac="$AC_PROFILE"; battery="$BATTERY_PROFILE"; low="$LOW_BATTERY_PROFILE"; warning="$LOW_BATTERY_WARNING_LEVEL"
+
+    say
+    say "${BOLD}${BLUE}GNOME Power Mode Automation${RESET}"
+    say "------------------------------------------------------------"
+    say "Choose the visible GNOME mode for each physical power state."
+    say "Manual GNOME changes are preserved until the next state transition."
+
+    choose_profile "1 of 3: Charger connected" "Mode to apply after connecting AC power." "$ac"
+    ac="$SELECTED_PROFILE"
+    choose_profile "2 of 3: Normal battery" "Mode to apply after disconnecting AC power." "$battery"
+    battery="$SELECTED_PROFILE"
+    choose_profile "3 of 3: Low battery" "Mode to apply when UPower reports low battery." "$low"
+    low="$SELECTED_PROFILE"
+    choose_warning "$warning"
+    warning="$SELECTED_WARNING"
+
+    say
+    say "${BOLD}Selected policy${RESET}"
+    say "------------------------------------------------------------"
+    printf '  Charger connected : %s\n' "$(profile_label "$ac")"
+    printf '  Normal battery    : %s\n' "$(profile_label "$battery")"
+    printf '  Low battery       : %s\n' "$(profile_label "$low")"
+    printf '  Low trigger       : %s\n' "$(warning_label "$warning")"
+    say
+
+    printf 'Save this policy? [Y/n]: '
+    read -r answer
+    case "${answer:-Y}" in
+        y|Y|yes|YES)
+            write_config "$ac" "$battery" "$low" "$warning"
+            success "Configuration saved to $CONFIG"
+            ;;
+        *) info "Cancelled. No configuration changes were made." ;;
+    esac
+}
+
+monitor() {
+    require_command upower
+    require_command busctl
+    load_config
+    require_ppd_api
+    apply_policy --force
+
+    while true; do
+        while IFS= read -r _event; do
+            apply_policy || log "Could not apply policy after UPower event"
+        done < <(upower --monitor-detail)
+        sleep 2
+    done
+}
+
+main() {
+    local command="${1:-help}"
+    shift || true
+    case "$command" in
+        configure) require_root; configure "$@" ;;
+        status) require_root; show_status ;;
+        apply) require_root; load_config; require_ppd_api; apply_policy --force ;;
+        monitor) require_root; monitor ;;
+        help|-h|--help) usage ;;
+        --version) printf '%s\n' "$VERSION" ;;
+        *) die "Unknown command: $command" ;;
+    esac
+}
+
+main "$@"
