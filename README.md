@@ -1,9 +1,9 @@
 > [!NOTE]
-> I wanted my Fedora laptop to switch GNOME power modes automatically when moving between AC power, battery, and low-battery states, but I could not find a simple built-in configuration for that.
+> I wanted my **Fedora laptop** to switch GNOME power modes automatically when moving between AC power, battery, and low-battery states, but I could not find a simple built-in configuration for that.
 >
 > This project is a small helper script that:
 > 
-> 1. Hoocks to UPower for charger and battery-warning state changes.
+> 1. Hooks to UPower for charger and battery-warning state changes.
 > 2. Sets GNOME's visible Power Mode through the Power Profiles interface exposed by Fedora's `tuned-ppd`.
 >
 > It does not modify TuneD profiles or tune the CPU directly; it only automates the same visible GNOME power-mode choice you can make manually.
