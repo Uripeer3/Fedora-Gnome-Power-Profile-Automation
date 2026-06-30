@@ -96,7 +96,7 @@ Low trigger        -> UPower "Low" warning
 | `sudo gnome-power-profile-automation configure` | Open the guided policy menu |
 | `sudo gnome-power-profile-automation configure --yes` | Reset policy to recommended defaults |
 | `sudo gnome-power-profile-automation status` | Show power state, target profile, and visible GNOME mode |
-| `sudo gnome-power-profile-automation apply` | Force the configured policy once now |
+| `sudo gnome-power-profile-automation apply` | Force the policy once now |
 | `journalctl -u gnome-power-profile-automation.service -f` | Follow state-transition logs |
 | `sudo ./uninstall.sh` | Remove the service and keep the configuration |
 | `sudo ./uninstall.sh --purge-config` | Remove the service and configuration |
@@ -219,4 +219,4 @@ Review the scripts before installing them on a shared or production machine.
 
 ## License
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the repository's existing [GNU General Public License v3.0](LICENSE).
