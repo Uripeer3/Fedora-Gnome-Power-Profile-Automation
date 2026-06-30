@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+report_file="${root_dir}/.shellcheck-report.json"
 files=(
   "$root_dir/install.sh"
   "$root_dir/uninstall.sh"
@@ -16,7 +17,12 @@ for file in "${files[@]}"; do
 done
 
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck --severity=warning "${files[@]}"
+  if ! shellcheck --severity=warning --format=json "${files[@]}" > "$report_file"; then
+    printf 'ShellCheck reported findings:\n' >&2
+    cat "$report_file" >&2
+    exit 1
+  fi
+  rm -f "$report_file"
   printf 'shellcheck OK\n'
 else
   printf 'shellcheck not installed; skipped static lint.\n'
