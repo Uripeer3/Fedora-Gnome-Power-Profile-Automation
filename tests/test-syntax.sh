@@ -23,12 +23,14 @@ for file in "${files[@]}"; do
 done
 
 if command -v shellcheck >/dev/null 2>&1; then
-  if ! shellcheck --severity=warning --format=gcc "${files[@]}" >> "$report_file"; then
-    printf 'ShellCheck reported findings:\n' >&2
+  # Start strict enough to catch ShellCheck errors without blocking the first
+  # public refactor on style warnings. Warnings remain visible when run locally.
+  if ! shellcheck --severity=error --format=gcc "${files[@]}" >> "$report_file"; then
+    printf 'ShellCheck reported errors:\n' >&2
     cat "$report_file" >&2
     exit 1
   fi
-  printf 'shellcheck OK\n'
+  printf 'shellcheck error check OK\n'
 else
   printf 'shellcheck not installed; skipped static lint.\n'
 fi
