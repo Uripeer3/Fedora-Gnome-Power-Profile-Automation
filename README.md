@@ -1,9 +1,9 @@
 > [!NOTE]
 > I wanted my **Fedora laptop** to switch GNOME power modes automatically when moving between AC power, battery, and low-battery states, but I could not find a simple built-in configuration for that.
 >
-> This project is a small helper script that:
-> 
-> 1. Hooks to UPower for charger and battery-warning state changes.
+> This project is a small helper that:
+>
+> 1. Hooks into UPower charger and battery-warning state changes.
 > 2. Sets GNOME's visible Power Mode through the Power Profiles interface exposed by Fedora's `tuned-ppd`.
 >
 > It does not modify TuneD profiles or tune the CPU directly; it only automates the same visible GNOME power-mode choice you can make manually.
@@ -14,14 +14,13 @@ A small Fedora utility that automatically selects the **visible GNOME Power Mode
 
 It is designed for Fedora Workstation systems that use **TuneD** plus `tuned-ppd` for GNOME's Power Profiles compatibility layer.
 
-And the default behavior will get you:
+The default behavior is:
 
 | Physical state | Default visible GNOME mode |
 |---|---|
 | Charger connected | **Performance** |
 | Normal battery | **Balanced** |
 | UPower low battery | **Power Saver** |
-
 
 ## Why this exists
 
@@ -91,6 +90,7 @@ Normal battery     -> Balanced
 Low battery        -> Power Saver
 Low trigger        -> UPower "Low" warning
 ```
+
 ## Features
 
 - Clear numbered terminal configuration menus; users choose `1`, `2`, or `3`, not internal profile names.
@@ -101,7 +101,6 @@ Low trigger        -> UPower "Low" warning
 - Does not edit `/etc/tuned/ppd.conf`.
 - Includes a read-only terminal dashboard for verifying GNOME, TuneD, service, and kernel CPU policy state together.
 - GitHub Actions validates Bash syntax and ShellCheck warnings.
-
 
 ## Everyday commands
 
@@ -209,6 +208,46 @@ A persistent mismatch between GNOME's visible mode and TuneD's active backend pr
 ```bash
 sudo tuned-adm verify
 ```
+
+## This project compared with TLP
+
+[TLP](https://linrunner.de/tlp/) is a respected and substantially broader Linux power-management framework. It is not a direct substitute for this project; the two tools make different trade-offs.
+
+| Aspect | This project | TLP |
+|---|---|---|
+| Primary role | A narrow **policy orchestrator** for GNOME's visible Power Mode | A broad **system power-management framework** |
+| Fedora integration | Uses the existing Fedora `tuned` + `tuned-ppd` stack | Applies and manages its own configurable power policy |
+| AC / battery switching | Configurable AC, normal-battery, and UPower low-battery modes | `tlp-pd` can automatically select Performance on AC and Balanced on battery |
+| Low-battery policy | Yes: configurable UPower warning-level trigger | No equivalent low-battery transition is part of the default `tlp-pd` switching model described by TLP |
+| GNOME / desktop menu | Changes the same visible profile GNOME already exposes through `tuned-ppd` | `tlp-pd` can implement the same desktop Power Profiles D-Bus API |
+| Direct hardware tuning | No. TuneD remains responsible for the actual profile contents | Yes. TLP exposes settings across processor, platform, battery care, storage, graphics, networking, PCIe, USB, radios, and more |
+| Background resource model | One small event-driven systemd service that waits for UPower events; no periodic polling | A broader system service and policy stack responsible for a much larger set of tunables |
+| Best fit | You want a simple, visible, Fedora-native GNOME policy with a low-battery rule | You want to own and tune a much wider laptop power-management policy |
+
+TLP documents that `tlp-pd` can replace a desktop Power Profiles implementation and provides automatic AC/battery switching, while its larger settings surface covers many power-management domains beyond desktop CPU profiles. See TLP's [Power Profiles documentation](https://linrunner.de/tlp/faq/ppd.html) and [settings catalogue](https://linrunner.de/tlp/settings/index.html).
+
+### Resource occupation
+
+Do not choose between the two solely by process count or a single memory number. Both are intended to be lightweight compared with normal desktop workloads, but they have different responsibilities.
+
+- This project adds one root-owned, event-driven monitor. It blocks while waiting for UPower events, then performs a small local D-Bus update only when the physical power state changes. The diagnostic dashboard under `tools/` is manual and is never installed as a background service.
+- The existing Fedora `tuned` and `tuned-ppd` services remain the actual backend. This project does not replace them or add a second low-level tuning engine.
+- TLP has a wider operational scope because it can manage many more classes of kernel and device settings. Its practical benefit and resource impact depend on the laptop, drivers, configured options, and workload.
+
+For a meaningful decision, measure your own machine under your own workload: battery power draw, thermals, responsiveness, suspend/resume behavior, and device stability are more useful than comparing daemon RSS alone.
+
+### Do not run both control stacks together
+
+> [!WARNING]
+> **Do not run TLP alongside this project, `tuned-ppd`, or another active desktop power-profile backend unless you intentionally replace the existing stack and understand the consequences.** Choose one owner for CPU/platform power policy.
+>
+> TLP explicitly warns that using it together with `power-profiles-daemon` can cause unpredictable results because both tools change overlapping kernel tunables. Fedora's `tuned-ppd` is a different compatibility provider, but this project actively directs TuneD through the same desktop Power Profiles interface. Treating the combination as unsupported is therefore the conservative and recommended configuration.
+
+TLP's conflict guidance is worth reading before changing your power-management stack: [TLP conflicts](https://linrunner.de/tlp/faq/conflicts.html) and [TLP vs. desktop Power Profiles](https://linrunner.de/tlp/faq/ppd.html).
+
+### Acknowledgements
+
+This project is intentionally narrower than TLP, not a claim that it is universally better. TLP's documentation is especially useful for understanding the trade-off between desktop power profiles, deeper device tuning, conflict avoidance, and workload-specific measurement. Thanks to the TLP project and its maintainers for the clear technical documentation.
 
 ## Project layout
 
