@@ -1,6 +1,20 @@
+> [!NOTE]
+> I wanted my Fedora laptop to switch GNOME power modes automatically when moving between AC power, battery, and low-battery states, but I could not find a simple built-in configuration for that.
+>
+> This project is a small helper script that:
+> 
+> 1. Hoocks to UPower for charger and battery-warning state changes.
+> 2. Sets GNOME's visible Power Mode through the Power Profiles interface exposed by Fedora's `tuned-ppd`.
+>
+> It does not modify TuneD profiles or tune the CPU directly; it only automates the same visible GNOME power-mode choice you can make manually.
+
 # GNOME Power Mode Automation for Fedora
 
 A small Fedora utility that automatically selects the **visible GNOME Power Mode** when a laptop moves between AC power, normal battery use, and the system-reported low-battery state.
+
+It is designed for Fedora Workstation systems that use **TuneD** plus `tuned-ppd` for GNOME's Power Profiles compatibility layer.
+
+And the default behavior will get you:
 
 | Physical state | Default visible GNOME mode |
 |---|---|
@@ -8,22 +22,10 @@ A small Fedora utility that automatically selects the **visible GNOME Power Mode
 | Normal battery | **Balanced** |
 | UPower low battery | **Power Saver** |
 
-It is designed for Fedora Workstation systems that use **TuneD** plus `tuned-ppd` for GNOME's Power Profiles compatibility layer.
 
 ## Why this exists
 
 GNOME has manual Performance, Balanced, and Power Saver modes, but it does not natively provide an AC/battery policy that visibly switches between them. This project implements that policy by updating the same public Power Profiles API GNOME uses, so the Quick Settings indicator remains meaningful.
-
-## Features
-
-- Clear numbered terminal configuration menus; users choose `1`, `2`, or `3`, not internal profile names.
-- Separate policies for charger connected, normal battery, and low battery.
-- Low battery is based on **UPower's own warning state**, not a hard-coded percentage.
-- A temporary manual choice in GNOME is respected until the next physical power-state change.
-- A small root-owned systemd service; no network requests and no telemetry.
-- Does not edit `/etc/tuned/ppd.conf`.
-- Includes a read-only terminal dashboard for verifying GNOME, TuneD, service, and kernel CPU policy state together.
-- GitHub Actions validates Bash syntax and ShellCheck warnings.
 
 ## Requirements
 
@@ -89,6 +91,17 @@ Normal battery     -> Balanced
 Low battery        -> Power Saver
 Low trigger        -> UPower "Low" warning
 ```
+## Features
+
+- Clear numbered terminal configuration menus; users choose `1`, `2`, or `3`, not internal profile names.
+- Separate policies for charger connected, normal battery, and low battery.
+- Low battery is based on **UPower's own warning state**, not a hard-coded percentage.
+- A temporary manual choice in GNOME is respected until the next physical power-state change.
+- A small root-owned systemd service; no network requests and no telemetry.
+- Does not edit `/etc/tuned/ppd.conf`.
+- Includes a read-only terminal dashboard for verifying GNOME, TuneD, service, and kernel CPU policy state together.
+- GitHub Actions validates Bash syntax and ShellCheck warnings.
+
 
 ## Everyday commands
 
