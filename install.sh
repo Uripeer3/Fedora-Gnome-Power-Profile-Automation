@@ -39,7 +39,9 @@ require_root() {
 }
 
 check_source_files() {
-    [[ -x "$RUNTIME_SOURCE" ]] || die "Missing runtime: $RUNTIME_SOURCE"
+    # GitHub's Contents API stores new files as regular readable files.
+    # install(1) sets the executable mode at the destination.
+    [[ -r "$RUNTIME_SOURCE" ]] || die "Missing runtime: $RUNTIME_SOURCE"
     [[ -r "$SERVICE_SOURCE" ]] || die "Missing systemd unit: $SERVICE_SOURCE"
     [[ -r "$CONFIG_SOURCE" ]] || die "Missing config template: $CONFIG_SOURCE"
 }
