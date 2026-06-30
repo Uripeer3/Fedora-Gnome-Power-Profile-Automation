@@ -1,0 +1,13 @@
+[Unit]
+Description=Visible GNOME Power Mode automation from AC and UPower state
+After=upower.service tuned.service tuned-ppd.service
+Wants=upower.service tuned.service tuned-ppd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/gnome-power-profile-automation monitor
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
