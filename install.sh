@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Install GNOME Power Mode Automation on Fedora.
 
 set -Eeuo pipefail
@@ -86,9 +86,6 @@ main() {
     check_requirements
     install_files
 
-    systemctl daemon-reload
-    systemctl enable --now "${APP}.service"
-
     # A first interactive installation should offer the guided policy menu.
     # Existing configurations remain untouched unless --reconfigure is chosen.
     if "$RECONFIGURE" || { "$CONFIG_CREATED" && ! "$ASSUME_YES"; }; then
@@ -97,8 +94,10 @@ main() {
         else
             "$COMMAND_DEST" configure
         fi
-        systemctl restart "${APP}.service"
     fi
+
+    systemctl daemon-reload
+    systemctl enable --now "${APP}.service"
 
     printf '\nInstalled %s.\n' "$APP"
     printf 'Configure: sudo %s configure\n' "$APP"
