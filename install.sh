@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Install GNOME Power Mode Automation on Fedora.
+
+set -Eeuo pipefail
+
+APP="gnome-power-profile-automation"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME_SOURCE="${ROOT_DIR}/src/${APP}"
+SERVICE_SOURCE="${ROOT_DIR}/systemd/${APP}.service"
+CONFIG_SOURCE="${ROOT_DIR}/config/${APP}.conf.example"
+RUNTIME_DEST="/usr/local/libexec/${APP}"
+COMMAND_DEST="/usr/local/sbin/${APP}"
+SERVICE_DEST="/etc/systemd/system/${APP}.service"
+CONFIG_DEST="/etc/${APP}.conf"
+
+ASSUME_YES=false
+RECONFIGURE=false
+CONFIG_CREATED=false
+
+usage() {
+    cat <<EOF
+Usage:
+  sudo ./install.sh [OPTIONS]
+
+Options:
+  -y, --yes          Install without prompts. On a new installation, use the
+                     recommended policy. Existing configuration is preserved.
+  --reconfigure      Open the guided setup after installation. With --yes,
+                     reset the policy to the recommended defaults.
+  -h, --help         Show this help text.
+EOF
+}
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+require_root() {
+    (( EUID == 0 )) || die "Run this installer with sudo."
+}
+
+check_source_files() {
+    [[ -x "$RUNTIME_SOURCE" ]] || die "Missing runtime: $RUNTIME_SOURCE"
+    [[ -r "$SERVICE_SOURCE" ]] || die "Missing systemd unit: $SERVICE_SOURCE"
+    [[ -r "$CONFIG_SOURCE" ]] || die "Missing config template: $CONFIG_SOURCE"
+}
+
+check_requirements() {
+    local missing=()
+    rpm -q tuned >/dev/null 2>&1 || missing+=("tuned")
+    rpm -q tuned-ppd >/dev/null 2>&1 || missing+=("tuned-ppd")
+    command -v upower >/dev/null 2>&1 || missing+=("upower")
+    command -v busctl >/dev/null 2>&1 || missing+=("busctl")
+
+    if (( ${#missing[@]} > 0 )); then
+        die "Missing requirements: ${missing[*]}. Install them with: sudo dnf install tuned tuned-ppd upower"
+    fi
+}
+
+install_files() {
+    install -D -m 0755 "$RUNTIME_SOURCE" "$RUNTIME_DEST"
+    install -D -m 0644 "$SERVICE_SOURCE" "$SERVICE_DEST"
+    ln -sfn "$RUNTIME_DEST" "$COMMAND_DEST"
+
+    if [[ ! -e "$CONFIG_DEST" ]]; then
+        install -D -m 0644 "$CONFIG_SOURCE" "$CONFIG_DEST"
+        CONFIG_CREATED=true
+        printf 'Created configuration: %s\n' "$CONFIG_DEST"
+    else
+        printf 'Keeping existing configuration: %s\n' "$CONFIG_DEST"
+    fi
+}
+
+main() {
+    while (( $# > 0 )); do
+        case "$1" in
+            -y|--yes) ASSUME_YES=true ;;
+            --reconfigure) RECONFIGURE=true ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+        shift
+    done
+
+    require_root
+    check_source_files
+    check_requirements
+    install_files
+
+    systemctl daemon-reload
+    systemctl enable --now "${APP}.service"
+
+    # A first interactive installation should offer the guided policy menu.
+    # Existing configurations remain untouched unless --reconfigure is chosen.
+    if "$RECONFIGURE" || { "$CONFIG_CREATED" && ! "$ASSUME_YES"; }; then
+        if "$ASSUME_YES"; then
+            "$COMMAND_DEST" configure --yes
+        else
+            "$COMMAND_DEST" configure
+        fi
+        systemctl restart "${APP}.service"
+    fi
+
+    printf '\nInstalled %s.\n' "$APP"
+    printf 'Configure: sudo %s configure\n' "$APP"
+    printf 'Status:    sudo %s status\n' "$APP"
+    printf 'Logs:      journalctl -u %s.service -f\n' "$APP"
+}
+
+main "$@"
