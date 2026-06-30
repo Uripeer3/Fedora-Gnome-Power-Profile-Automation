@@ -3,95 +3,84 @@
 >
 > This project is a small helper script that:
 > 
-> 1. Watches UPower for charger and battery-warning state changes.
+> 1. Hoocks to UPower for charger and battery-warning state changes.
 > 2. Sets GNOME's visible Power Mode through the Power Profiles interface exposed by Fedora's `tuned-ppd`.
 >
 > It does not modify TuneD profiles or tune the CPU directly; it only automates the same visible GNOME power-mode choice you can make manually.
 
 # GNOME Power Mode Automation for Fedora
 
-A small Bash installer that keeps the **visible GNOME Power Mode** aligned with the laptop's real power state:
+A small Fedora utility that automatically selects the **visible GNOME Power Mode** when a laptop moves between AC power, normal battery use, and the system-reported low-battery state.
+
+It is designed for Fedora Workstation systems that use **TuneD** plus `tuned-ppd` for GNOME's Power Profiles compatibility layer.
+
+And the default behavior will get you:
 
 | Physical state | Default visible GNOME mode |
 |---|---|
 | Charger connected | **Performance** |
-| Normal battery use | **Balanced** |
-| System-reported low battery | **Power Saver** |
+| Normal battery | **Balanced** |
+| UPower low battery | **Power Saver** |
 
-The installer uses a guided terminal menu, creates one small systemd service, and listens to **UPower** for power-source and battery-warning changes. It is intended for Fedora systems using **TuneD** with the `tuned-ppd` compatibility layer.
 
-> **Design goal:** GNOME's Quick Settings remain truthful. When the script moves to a new physical power state, GNOME itself visibly changes between Performance, Balanced, and Power Saver.
+## Why this exists
 
-> [!IMPORTANT]
-> This repository has been tested for personal use on: Fedora 44 w. Gnome 50
-> 
-> Pull Request's and contribution are welcome ^_^
----
-
-## What it does
-
-- Presents a clean, numbered `1 / 2 / 3` setup menu instead of asking for internal profile names.
-- Lets you select a GNOME power mode for:
-  1. AC power connected
-  2. Normal battery use
-  3. Low battery
-- Uses the **system-reported** UPower warning state instead of a hard-coded battery percentage.
-- Updates the public GNOME Power Mode through the Power Profiles D-Bus interface exposed by `tuned-ppd`.
-- Preserves a temporary manual GNOME choice while the laptop remains in the same physical state.
-- Does **not** modify `/etc/tuned/ppd.conf`.
-- Has no network behavior, no telemetry, and no third-party daemon dependency.
-
----
+GNOME has manual Performance, Balanced, and Power Saver modes, but it does not natively provide an AC/battery policy that visibly switches between them. This project implements that policy by updating the same public Power Profiles API GNOME uses, so the Quick Settings indicator remains meaningful.
 
 ## Requirements
 
-This project is intended for **Fedora Workstation with GNOME**, where the GNOME power menu is backed by `tuned-ppd`.
+- Fedora Workstation with GNOME
+- `tuned`
+- `tuned-ppd`
+- `upower`
 
-Required packages:
+Install the dependencies:
 
 ```bash
 sudo dnf install tuned tuned-ppd upower
 ```
 
-The script also uses standard tools provided by Fedora's base system: Bash, systemd, `busctl`, and `journalctl`.
+Fedora uses TuneD with `tuned-ppd` to provide the Power Profiles API used by GNOME. UPower provides the display-battery state and warning level used by this utility. See Fedora's [TuneD change proposal](https://fedoraproject.org/wiki/Changes/TunedAsTheDefaultPowerProfileManagementDaemon) and the [UPower Device API](https://upower.freedesktop.org/docs/Device.html).
 
-Fedora adopted `tuned` plus `tuned-ppd` as the desktop-facing power-profile backend; `tuned-ppd` acts as the compatibility bridge for desktops that expect the Power Profiles API. UPower exposes the composite display battery and its warning level through its system D-Bus API.  
-Sources: [Fedora Change proposal](https://fedoraproject.org/wiki/Changes/TunedAsTheDefaultPowerProfileManagementDaemon), [UPower API reference](https://upower.freedesktop.org/docs/UPower.html), [UPower device properties](https://upower.freedesktop.org/docs/Device.html).
+## Installation
 
----
-
-## Install
-
-Clone or download the repository, then run the script with `sudo`:
+Clone the repository, review it, and run the installer locally:
 
 ```bash
-chmod +x gnome_tuned_ppd_mode_hook.sh
-sudo ./gnome_tuned_ppd_mode_hook.sh
+git clone https://github.com/Uripeer3/Fedora-Gnome-Power-Profile-Automation.git
+cd Fedora-Gnome-Power-Profile-Automation
+sudo ./install.sh
 ```
 
-The guided setup presents readable choices such as:
+The service runs as root because it writes a system-wide D-Bus power-profile property. Avoid blind `curl | sudo bash` installations; this project is meant to be inspected before installation.
+
+### Guided setup
+
+The installer can open the configuration menu immediately:
+
+```bash
+sudo ./install.sh --reconfigure
+```
+
+The menu explains each choice:
 
 ```text
-1 of 3: Charger connected
+1) Performance
+   Maximum responsiveness for compiling, containers, and heavy work.
 
-  1) Performance
-     Highest responsiveness and the most eager CPU boosting.
+2) Balanced
+   Recommended general-purpose mode with moderate power use.
 
-  2) Balanced
-     Recommended everyday mode.
-
-  3) Power Saver
-     Prioritizes battery runtime, lower heat, and quieter operation.
-
-Choose 1, 2, or 3 [default: 1]:
+3) Power Saver
+   Prioritizes battery runtime, lower heat, and quieter operation.
 ```
 
 ### Non-interactive installation
 
-To use the recommended defaults without prompts:
+Install with the recommended defaults:
 
 ```bash
-sudo ./gnome_tuned_ppd_mode_hook.sh --yes
+sudo ./install.sh --yes --reconfigure
 ```
 
 Default policy:
@@ -100,35 +89,49 @@ Default policy:
 Charger connected  -> Performance
 Normal battery     -> Balanced
 Low battery        -> Power Saver
-Low-battery trigger -> UPower "Low" warning
+Low trigger        -> UPower "Low" warning
 ```
+## Features
 
-If a configuration already exists, `--yes` preserves it. To reset to the defaults intentionally:
+- Clear numbered terminal configuration menus; users choose `1`, `2`, or `3`, not internal profile names.
+- Separate policies for charger connected, normal battery, and low battery.
+- Low battery is based on **UPower's own warning state**, not a hard-coded percentage.
+- A temporary manual choice in GNOME is respected until the next physical power-state change.
+- A small root-owned systemd service; no network requests and no telemetry.
+- Does not edit `/etc/tuned/ppd.conf`.
+- Includes a read-only terminal dashboard for verifying GNOME, TuneD, service, and kernel CPU policy state together.
+- GitHub Actions validates Bash syntax and ShellCheck warnings.
 
-```bash
-sudo ./gnome_tuned_ppd_mode_hook.sh --yes --reconfigure
-```
 
----
+## Everyday commands
 
-## How manual overrides work
+| Command | Purpose |
+|---|---|
+| `sudo gnome-power-profile-automation configure` | Open the guided policy menu |
+| `sudo gnome-power-profile-automation configure --yes` | Reset policy to recommended defaults |
+| `sudo gnome-power-profile-automation status` | Show power state, target profile, and visible GNOME mode |
+| `sudo gnome-power-profile-automation apply` | Force the policy once now |
+| `bash tools/watch-power-profile-backend.sh` | Open the live backend monitor |
+| `journalctl -u gnome-power-profile-automation.service -f` | Follow state-transition logs |
+| `sudo ./uninstall.sh` | Remove the service and keep the configuration |
+| `sudo ./uninstall.sh --purge-config` | Remove the service and configuration |
 
-The automation reacts to a change in **physical state**, not every battery percentage update.
+## Manual override behavior
+
+The monitor responds to **physical state transitions**, not to every battery-percentage update.
 
 For example:
 
-1. You unplug your laptop: GNOME changes from **Performance** to **Balanced**.
-2. While still on battery, you manually choose **Performance** for a compile or another demanding task.
-3. The script leaves that manual setting alone.
-4. It applies the configured policy again only when the physical state changes, such as plugging in, unplugging, entering low battery, or leaving low battery.
+1. You unplug the charger, and the configured normal-battery mode is selected.
+2. You manually choose **Performance** in GNOME for a compile.
+3. The monitor leaves that choice alone while the laptop remains on normal battery.
+4. It applies policy again only when you plug in, unplug, enter low battery, or leave low battery.
 
-The service applies the configured policy once when it starts. Restarting the service or using `--apply` therefore intentionally overrides a temporary manual selection.
+Restarting the service or running `apply` intentionally forces the configured policy again.
 
----
+## Configuration file
 
-## Configuration
-
-The generated configuration file is:
+The installed configuration is:
 
 ```text
 /etc/gnome-power-profile-automation.conf
@@ -143,7 +146,7 @@ LOW_BATTERY_PROFILE="power-saver"
 LOW_BATTERY_WARNING_LEVEL=3
 ```
 
-Allowed profile values are:
+Allowed profiles:
 
 ```text
 performance
@@ -151,124 +154,96 @@ balanced
 power-saver
 ```
 
-UPower warning levels used by this project:
+UPower low-battery levels supported by the tool:
 
 | Value | Meaning |
 |---:|---|
 | `3` | Low |
 | `4` | Critical |
-| `5` | Action / final low-battery state |
+| `5` | Action / final battery state |
 
-Use the guided configurator instead of editing the file manually:
-
-```bash
-sudo ./gnome_tuned_ppd_mode_hook.sh --reconfigure
-```
-
-After a manual file edit, restart the service:
+Use the guided command rather than editing the file directly. After a manual edit, restart the service:
 
 ```bash
 sudo systemctl restart gnome-power-profile-automation.service
 ```
 
----
+## Verify the backend is changing
 
-## Commands
-
-| Command | Purpose |
-|---|---|
-| `sudo ./gnome_tuned_ppd_mode_hook.sh` | Interactive install or service repair |
-| `sudo ./gnome_tuned_ppd_mode_hook.sh --yes` | Install with defaults, without prompts |
-| `sudo ./gnome_tuned_ppd_mode_hook.sh --reconfigure` | Open the guided setup again |
-| `sudo ./gnome_tuned_ppd_mode_hook.sh --status` | Show state, target profile, and current GNOME mode |
-| `sudo ./gnome_tuned_ppd_mode_hook.sh --apply` | Force the configured policy once now |
-| `sudo ./gnome_tuned_ppd_mode_hook.sh --uninstall` | Remove the service and runtime script |
-| `sudo ./gnome_tuned_ppd_mode_hook.sh --help` | Show command-line help |
-
-### View logs
+The repository includes a standalone, read-only monitor with a terminal dashboard:
 
 ```bash
-journalctl -u gnome-power-profile-automation.service -f
+bash tools/watch-power-profile-backend.sh
 ```
 
-### Check the service
+It refreshes every second and shows:
+
+- The visible GNOME Power Profiles API value.
+- TuneD's active backend profile.
+- `tuned.service`, `tuned-ppd.service`, and the automation-service state.
+- The active kernel CPU governor and energy-performance preference for every exposed CPU policy.
+- AC/battery state, battery percentage, and UPower warning level.
+
+Use it while plugging and unplugging the charger. Stop it with `Ctrl+C`.
 
 ```bash
-systemctl status gnome-power-profile-automation.service
+# Refresh every two seconds
+bash tools/watch-power-profile-backend.sh --interval 2
+
+# Print one clean snapshot for a bug report or issue
+bash tools/watch-power-profile-backend.sh --once
 ```
 
----
+It is intentionally **not** installed system-wide: it is a troubleshooting utility you can run directly from a clone of the repository, and it never changes a system setting.
 
-## Installed files
+The names differ by layer:
 
-The installer creates these local files:
+```text
+GNOME Performance  -> TuneD throughput-performance
+GNOME Balanced     -> TuneD balanced
+GNOME Power Saver  -> TuneD powersave
+```
 
-| Path | Purpose |
-|---|---|
-| `/usr/local/libexec/gnome-power-profile-automation` | Runtime monitor used by systemd |
-| `/etc/gnome-power-profile-automation.conf` | Your policy settings |
-| `/etc/systemd/system/gnome-power-profile-automation.service` | The systemd unit |
-| `/run/gnome-power-profile-automation/last-state` | Temporary state memory; recreated at boot |
-
-`--uninstall` removes the service and runtime program, but deliberately keeps the configuration file so a future installation can reuse your settings.
-
----
-
-## Troubleshooting
-
-### The GNOME Power Mode menu is missing
-
-Confirm that Fedora's compatibility service is installed and running:
+A persistent mismatch between GNOME's visible mode and TuneD's active backend profile is worth investigating. For a stricter one-time check after a transition, run:
 
 ```bash
-sudo dnf install tuned tuned-ppd upower
-systemctl status tuned.service tuned-ppd.service
+sudo tuned-adm verify
 ```
 
-Then confirm the Power Profiles D-Bus service responds:
+## Project layout
+
+```text
+.
+|-- config/       Default configuration template
+|-- src/          Installed command and UPower monitor runtime
+|-- systemd/       Systemd unit file
+|-- tests/         Syntax and ShellCheck validation
+|-- tools/         Read-only development and troubleshooting utilities
+|-- install.sh     Installer
+|-- uninstall.sh   Uninstaller
+`-- README.md
+```
+
+The files are intentionally separated. The installer copies tracked source files rather than generating a long program through nested heredocs, making changes easier to review, test, package, and upgrade.
+
+## Development
+
+Run local validation:
 
 ```bash
-busctl --system get-property \
-  net.hadess.PowerProfiles \
-  /net/hadess/PowerProfiles \
-  net.hadess.PowerProfiles \
-  ActiveProfile
+bash tests/test-syntax.sh
 ```
 
-### The automation service does not start
-
-Read the service log:
-
-```bash
-journalctl -u gnome-power-profile-automation.service -b --no-pager
-```
-
-Then check the backend services:
-
-```bash
-systemctl status upower.service tuned.service tuned-ppd.service
-```
-
-### It does not switch at the expected percentage
-
-That is expected: the script does not use a percentage threshold. It follows the `WarningLevel` reported by UPower, which depends on system policy, battery hardware, and desktop configuration. Run:
-
-```bash
-sudo ./gnome_tuned_ppd_mode_hook.sh --status
-```
-
-to see the current warning level.
-
----
+GitHub Actions runs the same syntax and ShellCheck validation for pushes to `main` and pull requests.
 
 ## Security and scope
 
-The installed service runs as root because it writes the system-wide Power Profiles D-Bus property. It only reads local UPower state and sends local D-Bus calls; it does not make network connections or collect data.
+The systemd service runs as root because it changes a system-wide Power Profiles D-Bus property. It only reads local UPower state and performs local D-Bus calls. It has no network logic, telemetry, or third-party daemon dependency.
 
-Review the script before installing it, particularly before using it on a shared or production machine.
+The backend monitor under `tools/` is read-only and does not need `sudo` for ordinary status reads.
 
----
+Review the scripts before installing them on a shared or production machine.
 
 ## License
 
-No license file is included yet. Add an appropriate `LICENSE` file before redistributing the project publicly.
+Licensed under the repository's existing [GNU General Public License v3.0](LICENSE).

@@ -1,0 +1,8 @@
+# GNOME Power Mode Automation configuration
+# Allowed values: performance, balanced, power-saver
+# UPower warning levels: 3=Low, 4=Critical, 5=Action
+
+AC_PROFILE="performance"
+BATTERY_PROFILE="balanced"
+LOW_BATTERY_PROFILE="power-saver"
+LOW_BATTERY_WARNING_LEVEL=3
