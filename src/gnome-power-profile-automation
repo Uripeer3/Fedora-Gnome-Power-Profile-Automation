@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Runtime controller for GNOME Power Mode Automation on Fedora.
 
 set -Eeuo pipefail
@@ -130,6 +130,16 @@ warning_label() {
     esac
 }
 
+validate_config_permissions() {
+    local owner mode
+
+    owner="$(stat -c '%u' "$CONFIG")" || die "Cannot read configuration ownership: $CONFIG"
+    mode="$(stat -c '%a' "$CONFIG")" || die "Cannot read configuration mode: $CONFIG"
+
+    [[ "$owner" == "0" ]] || die "Configuration must be owned by root: $CONFIG"
+    (( (8#$mode & 8#022) == 0 )) || die "Configuration must not be group- or world-writable: $CONFIG"
+}
+
 load_config() {
     AC_PROFILE="$DEFAULT_AC_PROFILE"
     BATTERY_PROFILE="$DEFAULT_BATTERY_PROFILE"
@@ -137,8 +147,10 @@ load_config() {
     LOW_BATTERY_WARNING_LEVEL="$DEFAULT_WARNING_LEVEL"
 
     [[ -r "$CONFIG" ]] || return 0
+    validate_config_permissions
 
-    # Created by the installer and expected to be root-owned.
+    # The installer creates this root-owned configuration file. Permission
+    # validation above ensures that untrusted users cannot inject shell code.
     # shellcheck disable=SC1090
     source "$CONFIG"
 
@@ -149,13 +161,15 @@ load_config() {
 }
 
 write_config() {
-    local ac="$1" battery="$2" low="$3" warning="$4"
+    local ac="$1" battery="$2" low="$3" warning="$4" temporary
     validate_profile "$ac"
     validate_profile "$battery"
     validate_profile "$low"
     [[ "$warning" =~ ^[3-5]$ ]] || die "Invalid UPower warning level: $warning"
 
-    cat > "$CONFIG" <<EOF
+    temporary="$(mktemp "${CONFIG}.XXXXXX")" || die "Could not create a temporary configuration file."
+
+    cat > "$temporary" <<EOF
 # ${APP} configuration
 # Allowed profile values: performance, balanced, power-saver
 # UPower warning levels: 3=Low, 4=Critical, 5=Action
@@ -165,7 +179,10 @@ BATTERY_PROFILE="${battery}"
 LOW_BATTERY_PROFILE="${low}"
 LOW_BATTERY_WARNING_LEVEL=${warning}
 EOF
-    chmod 0644 "$CONFIG"
+
+    chown root:root "$temporary"
+    chmod 0644 "$temporary"
+    mv -f "$temporary" "$CONFIG"
 }
 
 require_ppd_api() {
