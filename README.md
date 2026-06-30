@@ -1,4 +1,4 @@
-> [!INFO]
+> [!NOTE]
 > I wanted my Fedora laptop to switch GNOME power modes automatically when moving between AC power, battery, and low-battery states, but I could not find a simple built-in configuration for that.
 >
 > This project is a small helper script that:
