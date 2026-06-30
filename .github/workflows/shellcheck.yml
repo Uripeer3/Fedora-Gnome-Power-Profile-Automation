@@ -18,10 +18,10 @@ jobs:
       - name: Run syntax and ShellCheck validation
         run: bash tests/test-syntax.sh
 
-      - name: Upload ShellCheck report on failure
+      - name: Upload shell-quality report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: shellcheck-report
-          path: .shellcheck-report.json
+          name: shell-quality-report
+          path: .shell-quality-report.txt
           if-no-files-found: ignore
