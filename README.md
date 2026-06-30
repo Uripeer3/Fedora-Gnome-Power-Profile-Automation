@@ -22,6 +22,7 @@ GNOME has manual Performance, Balanced, and Power Saver modes, but it does not n
 - A temporary manual choice in GNOME is respected until the next physical power-state change.
 - A small root-owned systemd service; no network requests and no telemetry.
 - Does not edit `/etc/tuned/ppd.conf`.
+- Includes a read-only terminal dashboard for verifying GNOME, TuneD, service, and kernel CPU policy state together.
 - GitHub Actions validates Bash syntax and ShellCheck warnings.
 
 ## Requirements
@@ -97,6 +98,7 @@ Low trigger        -> UPower "Low" warning
 | `sudo gnome-power-profile-automation configure --yes` | Reset policy to recommended defaults |
 | `sudo gnome-power-profile-automation status` | Show power state, target profile, and visible GNOME mode |
 | `sudo gnome-power-profile-automation apply` | Force the policy once now |
+| `bash tools/watch-power-profile-backend.sh` | Open the live backend monitor |
 | `journalctl -u gnome-power-profile-automation.service -f` | Follow state-transition logs |
 | `sudo ./uninstall.sh` | Remove the service and keep the configuration |
 | `sudo ./uninstall.sh --purge-config` | Remove the service and configuration |
@@ -155,28 +157,31 @@ sudo systemctl restart gnome-power-profile-automation.service
 
 ## Verify the backend is changing
 
-Show the utility's own state view:
+The repository includes a standalone, read-only monitor with a terminal dashboard:
 
 ```bash
-sudo gnome-power-profile-automation status
+bash tools/watch-power-profile-backend.sh
 ```
 
-For a live test, open another terminal while plugging and unplugging the charger:
+It refreshes every second and shows:
+
+- The visible GNOME Power Profiles API value.
+- TuneD's active backend profile.
+- `tuned.service`, `tuned-ppd.service`, and the automation-service state.
+- The active kernel CPU governor and energy-performance preference for every exposed CPU policy.
+- AC/battery state, battery percentage, and UPower warning level.
+
+Use it while plugging and unplugging the charger. Stop it with `Ctrl+C`.
 
 ```bash
-watch -n 1 '
-printf "GNOME API: "
-busctl --system get-property \
-  net.hadess.PowerProfiles \
-  /net/hadess/PowerProfiles \
-  net.hadess.PowerProfiles \
-  ActiveProfile
+# Refresh every two seconds
+bash tools/watch-power-profile-backend.sh --interval 2
 
-echo
-echo "TuneD backend:"
-tuned-adm active
-'
+# Print one clean snapshot for a bug report or issue
+bash tools/watch-power-profile-backend.sh --once
 ```
+
+It is intentionally **not** installed system-wide: it is a troubleshooting utility you can run directly from a clone of the repository, and it never changes a system setting.
 
 The names differ by layer:
 
@@ -186,14 +191,21 @@ GNOME Balanced     -> TuneD balanced
 GNOME Power Saver  -> TuneD powersave
 ```
 
+A persistent mismatch between GNOME's visible mode and TuneD's active backend profile is worth investigating. For a stricter one-time check after a transition, run:
+
+```bash
+sudo tuned-adm verify
+```
+
 ## Project layout
 
 ```text
 .
 |-- config/       Default configuration template
-|-- src/          Installed command and monitor runtime
+|-- src/          Installed command and UPower monitor runtime
 |-- systemd/       Systemd unit file
 |-- tests/         Syntax and ShellCheck validation
+|-- tools/         Read-only development and troubleshooting utilities
 |-- install.sh     Installer
 |-- uninstall.sh   Uninstaller
 `-- README.md
@@ -214,6 +226,8 @@ GitHub Actions runs the same syntax and ShellCheck validation for pushes to `mai
 ## Security and scope
 
 The systemd service runs as root because it changes a system-wide Power Profiles D-Bus property. It only reads local UPower state and performs local D-Bus calls. It has no network logic, telemetry, or third-party daemon dependency.
+
+The backend monitor under `tools/` is read-only and does not need `sudo` for ordinary status reads.
 
 Review the scripts before installing them on a shared or production machine.
 
