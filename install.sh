@@ -102,6 +102,8 @@ main() {
         else
             "$COMMAND_DEST" configure
         fi
+    else
+        "$COMMAND_DEST" sync-lid-policy
     fi
 
     systemctl daemon-reload
