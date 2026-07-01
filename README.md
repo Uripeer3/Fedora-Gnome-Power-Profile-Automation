@@ -5,12 +5,13 @@
 >
 > 1. Hooks into UPower charger and battery-warning state changes.
 > 2. Sets GNOME's visible Power Mode through the Power Profiles interface exposed by Fedora's `tuned-ppd`.
+> 3. Configures systemd-logind's native lid-close action separately for battery and AC power.
 >
 > It does not modify TuneD profiles or tune the CPU directly; it only automates the same visible GNOME power-mode choice you can make manually.
 
 # GNOME Power Mode Automation for Fedora
 
-A small Fedora utility that automatically selects the **visible GNOME Power Mode** when a laptop moves between AC power, normal battery use, and the system-reported low-battery state.
+A small Fedora utility that automatically selects the **visible GNOME Power Mode** when a laptop moves between AC power, normal battery use, and the system-reported low-battery state. It can also configure a simple, separate lid-close action for battery and AC power.
 
 It is designed for Fedora Workstation systems that use **TuneD** plus `tuned-ppd` for GNOME's Power Profiles compatibility layer.
 
@@ -21,6 +22,11 @@ The default behavior is:
 | Charger connected | **Performance** |
 | Normal battery | **Balanced** |
 | UPower low battery | **Power Saver** |
+
+| Lid-close condition | Default action |
+|---|---|
+| Battery | **Suspend** |
+| AC power | **Suspend** |
 
 ## Why this exists
 
@@ -39,7 +45,7 @@ Install the dependencies:
 sudo dnf install tuned tuned-ppd upower
 ```
 
-Fedora uses TuneD with `tuned-ppd` to provide the Power Profiles API used by GNOME. UPower provides the display-battery state and warning level used by this utility. See Fedora's [TuneD change proposal](https://fedoraproject.org/wiki/Changes/TunedAsTheDefaultPowerProfileManagementDaemon) and the [UPower Device API](https://upower.freedesktop.org/docs/Device.html).
+Fedora uses TuneD with `tuned-ppd` to provide the Power Profiles API used by GNOME. UPower provides the display-battery state and warning level used by this utility. Lid-close behavior uses the `systemd-logind` service already present on a normal Fedora system. See Fedora's [TuneD change proposal](https://fedoraproject.org/wiki/Changes/TunedAsTheDefaultPowerProfileManagementDaemon), the [UPower Device API](https://upower.freedesktop.org/docs/Device.html), and systemd's [logind configuration reference](https://www.freedesktop.org/software/systemd/man/latest/logind.conf.html).
 
 ## Installation
 
@@ -51,7 +57,7 @@ cd Fedora-Gnome-Power-Profile-Automation
 sudo ./install.sh
 ```
 
-The service runs as root because it writes a system-wide D-Bus power-profile property. Avoid blind `curl | sudo bash` installations; this project is meant to be inspected before installation.
+The service runs as root because it writes a system-wide D-Bus power-profile property and a small root-owned logind drop-in. Avoid blind `curl | sudo bash` installations; this project is meant to be inspected before installation.
 
 ### Guided setup
 
@@ -61,7 +67,7 @@ The installer can open the configuration menu immediately:
 sudo ./install.sh --reconfigure
 ```
 
-The menu explains each choice:
+The menu explains each GNOME mode:
 
 ```text
 1) Performance
@@ -72,6 +78,22 @@ The menu explains each choice:
 
 3) Power Saver
    Prioritizes battery runtime, lower heat, and quieter operation.
+```
+
+It then asks for a lid-close action on battery and on AC power:
+
+```text
+1) Suspend (recommended)
+   Sleep until the lid opens or another wake event occurs.
+
+2) Hibernate
+   Save memory to disk, then power down. Requires working hibernation.
+
+3) Lock screen
+   Keep the system running and ask the desktop session to lock.
+
+4) Do nothing
+   Leave the system running after the lid closes.
 ```
 
 ### Non-interactive installation
@@ -85,19 +107,23 @@ sudo ./install.sh --yes --reconfigure
 Default policy:
 
 ```text
-Charger connected  -> Performance
-Normal battery     -> Balanced
-Low battery        -> Power Saver
-Low trigger        -> UPower "Low" warning
+Charger connected       -> Performance
+Normal battery          -> Balanced
+Low battery             -> Power Saver
+Low trigger             -> UPower "Low" warning
+Lid close on battery    -> Suspend
+Lid close on AC         -> Suspend
 ```
 
 ## Features
 
-- Clear numbered terminal configuration menus; users choose `1`, `2`, or `3`, not internal profile names.
-- Separate policies for charger connected, normal battery, and low battery.
+- Clear numbered terminal configuration menus; users choose simple numbered actions rather than internal profile names.
+- Separate GNOME power-mode policies for charger connected, normal battery, and low battery.
 - Low battery is based on **UPower's own warning state**, not a hard-coded percentage.
+- Separate lid-close actions for battery and external power through a native `systemd-logind` configuration drop-in.
 - A temporary manual choice in GNOME is respected until the next physical power-state change.
 - A small root-owned systemd service; no network requests and no telemetry.
+- No additional lid-monitor process or polling loop.
 - Does not edit `/etc/tuned/ppd.conf`.
 - Includes a read-only terminal dashboard for verifying GNOME, TuneD, service, and kernel CPU policy state together.
 - GitHub Actions validates Bash syntax and ShellCheck warnings.
@@ -106,14 +132,15 @@ Low trigger        -> UPower "Low" warning
 
 | Command | Purpose |
 |---|---|
-| `sudo gnome-power-profile-automation configure` | Open the guided policy menu |
-| `sudo gnome-power-profile-automation configure --yes` | Reset policy to recommended defaults |
-| `sudo gnome-power-profile-automation status` | Show power state, target profile, and visible GNOME mode |
-| `sudo gnome-power-profile-automation apply` | Force the policy once now |
+| `sudo gnome-power-profile-automation configure` | Open the guided power-mode and lid-close policy menu |
+| `sudo gnome-power-profile-automation configure --yes` | Reset all policies to recommended defaults |
+| `sudo gnome-power-profile-automation status` | Show power state, target profile, visible GNOME mode, and configured lid actions |
+| `sudo gnome-power-profile-automation apply` | Force the power-profile policy once now |
+| `sudo gnome-power-profile-automation sync-lid-policy` | Rebuild and apply the logind lid-close drop-in from the saved configuration |
 | `bash tools/watch-power-profile-backend.sh` | Open the live backend monitor |
 | `journalctl -u gnome-power-profile-automation.service -f` | Follow state-transition logs |
-| `sudo ./uninstall.sh` | Remove the service and keep the configuration |
-| `sudo ./uninstall.sh --purge-config` | Remove the service and configuration |
+| `sudo ./uninstall.sh` | Remove the service and the managed lid policy, while keeping the configuration |
+| `sudo ./uninstall.sh --purge-config` | Remove the service, managed lid policy, and configuration |
 
 ## Manual override behavior
 
@@ -126,7 +153,7 @@ For example:
 3. The monitor leaves that choice alone while the laptop remains on normal battery.
 4. It applies policy again only when you plug in, unplug, enter low battery, or leave low battery.
 
-Restarting the service or running `apply` intentionally forces the configured policy again.
+Restarting the service or running `apply` intentionally forces the configured power-profile policy again.
 
 ## Configuration file
 
@@ -143,9 +170,11 @@ AC_PROFILE="performance"
 BATTERY_PROFILE="balanced"
 LOW_BATTERY_PROFILE="power-saver"
 LOW_BATTERY_WARNING_LEVEL=3
+LID_CLOSE_ON_BATTERY="suspend"
+LID_CLOSE_ON_AC="suspend"
 ```
 
-Allowed profiles:
+Allowed GNOME profiles:
 
 ```text
 performance
@@ -161,11 +190,38 @@ UPower low-battery levels supported by the tool:
 | `4` | Critical |
 | `5` | Action / final battery state |
 
-Use the guided command rather than editing the file directly. After a manual edit, restart the service:
+Allowed lid-close actions:
+
+| Value | Result |
+|---|---|
+| `suspend` | Sleep until a wake event occurs |
+| `hibernate` | Save memory to disk and power down; requires hibernation to be configured correctly |
+| `lock` | Ask the desktop session to lock without sleeping the system |
+| `ignore` | Keep the system running |
+
+Use the guided command rather than editing the file directly. After a manual edit, apply both the power profile and lid policy as needed:
 
 ```bash
+sudo gnome-power-profile-automation sync-lid-policy
 sudo systemctl restart gnome-power-profile-automation.service
 ```
+
+## Lid-close behavior
+
+The lid-close feature deliberately does **not** add another event listener. It writes this managed native systemd drop-in:
+
+```text
+/etc/systemd/logind.conf.d/90-gnome-power-profile-automation-lid.conf
+```
+
+The drop-in configures `HandleLidSwitch` for battery and `HandleLidSwitchExternalPower` for AC power, then reloads `systemd-logind`. That keeps the implementation small: the existing system service receives the lid-switch event and performs the configured action.
+
+> [!IMPORTANT]
+> The policy is system-wide. GNOME or another desktop component can hold a normal logind inhibitor while a session is active, and logind may defer the action accordingly. This is expected system behavior, not another background component from this project.
+>
+> This project intentionally does not change logind's separate docked-laptop behavior. When an external monitor makes the system appear docked, your existing `HandleLidSwitchDocked` policy can still determine the result.
+
+Use this project as the single owner of the two logind values it creates. Avoid manually editing the generated drop-in; use `configure` or edit the project configuration then run `sync-lid-policy`.
 
 ## Verify the backend is changing
 
@@ -215,14 +271,15 @@ sudo tuned-adm verify
 
 | Aspect | This project | TLP |
 |---|---|---|
-| Primary role | A narrow **policy orchestrator** for GNOME's visible Power Mode | A broad **system power-management framework** |
-| Fedora integration | Uses the existing Fedora `tuned` + `tuned-ppd` stack | Applies and manages its own configurable power policy |
+| Primary role | A narrow **policy orchestrator** for GNOME's visible Power Mode and native lid-close choices | A broad **system power-management framework** |
+| Fedora integration | Uses the existing Fedora `tuned` + `tuned-ppd` stack and systemd-logind | Applies and manages its own configurable power policy |
 | AC / battery switching | Configurable AC, normal-battery, and UPower low-battery modes | `tlp-pd` can automatically select Performance on AC and Balanced on battery |
 | Low-battery policy | Yes: configurable UPower warning-level trigger | No equivalent low-battery transition is part of the default `tlp-pd` switching model described by TLP |
+| Lid-close policy | Simple AC/battery split through native logind values; no additional monitor | TLP has broader platform settings, but lid-close policy is not this project's reason for choosing TLP |
 | GNOME / desktop menu | Changes the same visible profile GNOME already exposes through `tuned-ppd` | `tlp-pd` can implement the same desktop Power Profiles D-Bus API |
 | Direct hardware tuning | No. TuneD remains responsible for the actual profile contents | Yes. TLP exposes settings across processor, platform, battery care, storage, graphics, networking, PCIe, USB, radios, and more |
-| Background resource model | One small event-driven systemd service that waits for UPower events; no periodic polling | A broader system service and policy stack responsible for a much larger set of tunables |
-| Best fit | You want a simple, visible, Fedora-native GNOME policy with a low-battery rule | You want to own and tune a much wider laptop power-management policy |
+| Background resource model | One small event-driven UPower service; lid-close handling is delegated to existing logind | A broader system service and policy stack responsible for a much larger set of tunables |
+| Best fit | You want a simple, visible, Fedora-native GNOME policy with a low-battery rule and simple lid actions | You want to own and tune a much wider laptop power-management policy |
 
 TLP documents that `tlp-pd` can replace a desktop Power Profiles implementation and provides automatic AC/battery switching, while its larger settings surface covers many power-management domains beyond desktop CPU profiles. See TLP's [Power Profiles documentation](https://linrunner.de/tlp/faq/ppd.html) and [settings catalogue](https://linrunner.de/tlp/settings/index.html).
 
@@ -230,7 +287,8 @@ TLP documents that `tlp-pd` can replace a desktop Power Profiles implementation 
 
 Do not choose between the two solely by process count or a single memory number. Both are intended to be lightweight compared with normal desktop workloads, but they have different responsibilities.
 
-- This project adds one root-owned, event-driven monitor. It blocks while waiting for UPower events, then performs a small local D-Bus update only when the physical power state changes. The diagnostic dashboard under `tools/` is manual and is never installed as a background service.
+- This project adds one root-owned, event-driven UPower monitor. It blocks while waiting for UPower events, then performs a small local D-Bus update only when the physical power state changes.
+- Lid-close behavior adds **no process**. The project configures the existing `systemd-logind` service rather than polling for lid events itself.
 - The existing Fedora `tuned` and `tuned-ppd` services remain the actual backend. This project does not replace them or add a second low-level tuning engine.
 - TLP has a wider operational scope because it can manage many more classes of kernel and device settings. Its practical benefit and resource impact depend on the laptop, drivers, configured options, and workload.
 
@@ -277,7 +335,7 @@ GitHub Actions runs the same syntax and ShellCheck validation for pushes to `mai
 
 ## Security and scope
 
-The systemd service runs as root because it changes a system-wide Power Profiles D-Bus property. It only reads local UPower state and performs local D-Bus calls. It has no network logic, telemetry, or third-party daemon dependency.
+The systemd service runs as root because it changes a system-wide Power Profiles D-Bus property and a root-owned logind drop-in. It only reads local UPower state and performs local D-Bus or systemd operations. It has no network logic, telemetry, or third-party daemon dependency.
 
 The backend monitor under `tools/` is read-only and does not need `sudo` for ordinary status reads.
 
