@@ -8,6 +8,9 @@
 >
 > It does not modify TuneD profiles or tune the CPU directly; it only automates the same visible GNOME power-mode choice you can make manually.
 
+> [!WARNING]
+> **Do not run TLP alongside this project, `tuned-ppd`, or another active desktop power-profile backend.** See the last section of the README.md for a clear explanation of the differences.
+
 # GNOME Power Mode Automation for Fedora
 
 A small Fedora utility that automatically selects the **visible GNOME Power Mode** when a laptop moves between AC power, normal battery use, and the system-reported low-battery state.
