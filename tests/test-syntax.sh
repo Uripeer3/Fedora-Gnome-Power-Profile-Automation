@@ -14,23 +14,31 @@ files=(
 : > "$report_file"
 
 for file in "${files[@]}"; do
+  if [[ ! -x "$file" ]]; then
+    printf 'Expected an executable Git file mode: %s\n' "$file" >> "$report_file"
+  fi
+
   if ! bash -n "$file" 2>> "$report_file"; then
     printf 'Bash syntax check failed for: %s\n' "$file" >&2
     cat "$report_file" >&2
     exit 1
   fi
+
   printf 'syntax OK: %s\n' "$file"
 done
 
+if [[ -s "$report_file" ]]; then
+  cat "$report_file" >&2
+  exit 1
+fi
+
 if command -v shellcheck >/dev/null 2>&1; then
-  # Start strict enough to catch ShellCheck errors without blocking the first
-  # public refactor on style warnings. Warnings remain visible when run locally.
-  if ! shellcheck --severity=error --format=gcc "${files[@]}" >> "$report_file"; then
-    printf 'ShellCheck reported errors:\n' >&2
+  if ! shellcheck --severity=warning --format=gcc "${files[@]}" > "$report_file"; then
+    printf 'ShellCheck reported warnings or errors:\n' >&2
     cat "$report_file" >&2
     exit 1
   fi
-  printf 'shellcheck error check OK\n'
+  printf 'shellcheck OK\n'
 else
   printf 'shellcheck not installed; skipped static lint.\n'
 fi

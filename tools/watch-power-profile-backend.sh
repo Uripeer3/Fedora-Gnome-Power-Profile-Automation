@@ -193,9 +193,20 @@ cpu_policy_rows() {
     for policy in /sys/devices/system/cpu/cpufreq/policy*; do
         [[ -d "$policy" ]] || continue
         found=true
-        name="$(basename "$policy")"
-        governor="$(<"$policy/scaling_governor" 2>/dev/null || printf 'unavailable')"
-        epp="$(<"$policy/energy_performance_preference" 2>/dev/null || printf 'not exposed')"
+        name="${policy##*/}"
+
+        if [[ -r "$policy/scaling_governor" ]]; then
+            governor="$(<"$policy/scaling_governor")"
+        else
+            governor="unavailable"
+        fi
+
+        if [[ -r "$policy/energy_performance_preference" ]]; then
+            epp="$(<"$policy/energy_performance_preference")"
+        else
+            epp="not exposed"
+        fi
+
         printf '  %-10s governor: %-14s EPP: %s\n' "$name" "$governor" "$epp"
     done
 
