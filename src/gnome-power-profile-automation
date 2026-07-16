@@ -8,14 +8,6 @@ APP="gnome-power-profile-automation"
 VERSION="1.2.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${GNOME_POWER_PROFILE_AUTOMATION_LIB_DIR:-/usr/local/libexec/${APP}.d}"
-CONFIG="/etc/${APP}.conf"
-
-DEFAULT_AC_PROFILE="performance"
-DEFAULT_BATTERY_PROFILE="balanced"
-DEFAULT_LOW_PROFILE="power-saver"
-DEFAULT_WARNING_LEVEL="3"
-DEFAULT_LID_CLOSE_ON_BATTERY="suspend"
-DEFAULT_LID_CLOSE_ON_AC="suspend"
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]] && command -v tput >/dev/null 2>&1; then
     BOLD="$(tput bold)"
@@ -72,6 +64,9 @@ source "$LID_LIB"
 source "$MONITOR_LIB"
 # shellcheck source=lib/cli.sh
 source "$CLI_LIB"
+
+# BOLD is consumed by the sourced terminal UI; keep that shared context explicit.
+: "$BOLD"
 
 main() {
     local command="${1:-help}"
