@@ -143,7 +143,7 @@ Lid close on AC         -> Suspend
 | `bash tools/watch-power-profile-backend.sh` | Open the live backend monitor |
 | `journalctl -u gnome-power-profile-automation.service -f` | Follow state-transition logs |
 | `sudo ./uninstall.sh` | Remove the service and the managed lid policy, while keeping the configuration |
-| `sudo ./uninstall.sh --purge-config` | Remove the service, managed lid policy, and configuration |
+| `sudo ./uninstall.sh --purge-config` | Remove the service, managed lid policy, configuration, and migration backup |
 
 ## Manual override behavior
 
@@ -168,14 +168,18 @@ The installed configuration is:
 
 Example:
 
-```bash
-AC_PROFILE="performance"
-BATTERY_PROFILE="balanced"
-LOW_BATTERY_PROFILE="power-saver"
-LOW_BATTERY_WARNING_LEVEL=3
-LID_CLOSE_ON_BATTERY="suspend"
-LID_CLOSE_ON_AC="suspend"
+```ini
+[Policy]
+Version=1
+ACProfile=performance
+BatteryProfile=balanced
+LowBatteryProfile=power-saver
+LowBatteryWarningLevel=3
+LidCloseOnBattery=suspend
+LidCloseOnAC=suspend
 ```
+
+The file is parsed as versioned data and is never executed as shell code. During an upgrade, the installer safely converts the previous shell-style format and preserves the original as `/etc/gnome-power-profile-automation.conf.legacy.bak`.
 
 Allowed GNOME profiles:
 
