@@ -7,12 +7,17 @@ report_file="${root_dir}/.shell-quality-report.txt"
 export GNOME_POWER_PROFILE_AUTOMATION_LIB_DIR="${root_dir}/src/lib"
 export GNOME_POWER_PROFILE_AUTOMATION_CONFIG_LIB="${root_dir}/src/lib/config.sh"
 export GNOME_POWER_PROFILE_AUTOMATION_POLICY_LIB="${root_dir}/src/lib/policy.sh"
-executable_files=(
+shell_executable_files=(
   "$root_dir/install.sh"
   "$root_dir/uninstall.sh"
   "$root_dir/src/gnome-power-profile-automation"
   "$root_dir/tools/watch-power-profile-backend.sh"
 )
+python_executable_files=(
+  "$root_dir/src/gnome-power-profile-automation-backend"
+  "$root_dir/tests/test-backend-core.py"
+)
+executable_files=("${shell_executable_files[@]}" "${python_executable_files[@]}")
 library_files=(
   "$root_dir/src/lib/config.sh"
   "$root_dir/src/lib/cli.sh"
@@ -24,7 +29,7 @@ library_files=(
   "$root_dir/tests/test-policy.sh"
   "$root_dir/tests/test-runtime-modules.sh"
 )
-files=("${executable_files[@]}" "${library_files[@]}")
+files=("${shell_executable_files[@]}" "${library_files[@]}")
 
 : > "$report_file"
 
@@ -103,7 +108,7 @@ test_configure_leaves_inactive_monitor_stopped() (
     || fail "An inactive monitor must not be started by configure."
 )
 
-test_install_restarts_installed_runtime() (
+test_install_restarts_installed_runtimes() (
   # shellcheck source=../install.sh
   source "$root_dir/install.sh"
 
@@ -112,25 +117,42 @@ test_install_restarts_installed_runtime() (
     calls+=("$*")
   }
 
-  activate_service
+  activate_services
 
   [[ "${calls[0]:-}" == "daemon-reload" ]] \
     || fail "Expected systemd units to be reloaded first."
-  [[ "${calls[1]:-}" == "enable ${APP}.service" ]] \
-    || fail "Expected the service to be enabled."
-  [[ "${calls[2]:-}" == "restart ${APP}.service" ]] \
-    || fail "Expected installation and upgrades to restart the service."
-  (( ${#calls[@]} == 3 )) \
-    || fail "Unexpected systemctl calls while activating the service."
+  [[ "${calls[1]:-}" == "reload dbus-broker.service" ]] \
+    || fail "Expected the installed system D-Bus policy to be reloaded."
+  [[ "${calls[2]:-}" == "enable ${APP}.service ${APP}-backend.service" ]] \
+    || fail "Expected both services to be enabled."
+  [[ "${calls[3]:-}" == "restart ${APP}.service ${APP}-backend.service" ]] \
+    || fail "Expected installation and upgrades to restart both services."
+  (( ${#calls[@]} == 4 )) \
+    || fail "Unexpected systemctl calls while activating the services."
 )
 
 test_configure_restarts_active_monitor
 test_configure_leaves_inactive_monitor_stopped
-test_install_restarts_installed_runtime
+test_install_restarts_installed_runtimes
 printf 'service refresh tests OK\n'
+
+python3 - <<PY
+import ast
+from pathlib import Path
+
+for path in (
+    Path("$root_dir/src/gnome-power-profile-automation-backend"),
+    Path("$root_dir/src/backend/backend_core.py"),
+    Path("$root_dir/src/backend/backend_service.py"),
+    Path("$root_dir/tests/test-backend-core.py"),
+):
+    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    print(f"python syntax OK: {path}")
+PY
 
 bash "$root_dir/tests/test-policy.sh"
 bash "$root_dir/tests/test-config.sh"
 bash "$root_dir/tests/test-runtime-modules.sh"
+python3 "$root_dir/tests/test-backend-core.py"
 
 rm -f "$report_file"

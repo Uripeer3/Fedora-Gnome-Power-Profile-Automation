@@ -319,10 +319,11 @@ This project is intentionally narrower than TLP, not a claim that it is universa
 ```text
 .
 |-- config/       Default configuration template
+|-- dbus/         Public interface XML and system-bus ownership policy
 |-- docs/         Target architecture and versioned D-Bus contract
-|-- src/          Thin installed command and focused runtime libraries
-|-- systemd/       Systemd unit file
-|-- tests/         Syntax, ShellCheck, and policy behavior validation
+|-- src/          CLI runtime plus read-only backend and focused libraries
+|-- systemd/       Legacy monitor and read-only backend units
+|-- tests/         Shell, policy, configuration, and backend validation
 |-- tools/         Read-only development and troubleshooting utilities
 |-- install.sh     Installer
 |-- uninstall.sh   Uninstaller
@@ -336,18 +337,39 @@ dispatches commands. Configuration persistence, platform access, lid policy,
 monitoring, terminal UI, and pure policy decisions live in separate files under
 `src/lib/` so later backend work can replace one boundary at a time.
 
-## Target extension architecture
+## Extension architecture rollout
 
-The current 1.2 implementation is a root-owned Bash service. The planned GNOME
-extension will instead be an unprivileged client of a narrow system backend; it
-will never edit `/etc`, invoke `systemctl`, or set system-wide D-Bus properties
-directly.
+The root-owned Bash monitor remains the only component that applies policy. A
+second, read-only backend now publishes coherent status and configuration over
+the versioned system D-Bus interface. It observes the same providers but cannot
+write configuration, change a profile, or manage logind.
+
+This is an intentional migration stage. Authorized mutations, the unprivileged
+CLI client, and final monitor ownership move to the backend in later pull
+requests. The GNOME extension will then be an unprivileged client and will never
+edit `/etc`, invoke `systemctl`, or set system-wide D-Bus properties directly.
+
+Installation and maintenance still use `sudo`. Read-only D-Bus calls do not.
+
+After installation, inspect the transitional API without `sudo`:
+
+```bash
+busctl --system introspect \
+  io.github.Uripeer3.GnomePowerProfileAutomation1 \
+  /io/github/Uripeer3/GnomePowerProfileAutomation1
+
+busctl --system call \
+  io.github.Uripeer3.GnomePowerProfileAutomation1 \
+  /io/github/Uripeer3/GnomePowerProfileAutomation1 \
+  io.github.Uripeer3.GnomePowerProfileAutomation1 \
+  GetStatus
+```
 
 - [Target architecture and privilege model](docs/architecture.md)
 - [D-Bus API version 1](docs/dbus-api-v1.md)
 
-These documents define the contract for upcoming refactor and backend work.
-They do not describe an interface implemented by the current release.
+The documents define both the implemented read-only subset and the remaining
+target contract.
 
 ## Development
 
@@ -361,7 +383,10 @@ GitHub Actions runs the same syntax and ShellCheck validation for pushes to `mai
 
 ## Security and scope
 
-The systemd service runs as root because it changes a system-wide Power Profiles D-Bus property and a root-owned logind drop-in. It only reads local UPower state and performs local D-Bus or systemd operations. It has no network logic, telemetry, or third-party daemon dependency.
+The systemd services run as root. The legacy monitor changes the system-wide
+Power Profiles property, while the transitional backend only publishes
+read-only local state. Neither has network logic, telemetry, or a third-party
+daemon dependency.
 
 The backend monitor under `tools/` is read-only and does not need `sudo` for ordinary status reads.
 

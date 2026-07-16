@@ -7,17 +7,28 @@ set -Eeuo pipefail
 APP="gnome-power-profile-automation"
 RUNTIME_DEST="/usr/local/libexec/${APP}"
 LIBRARY_DEST_DIR="/usr/local/libexec/${APP}.d"
+BACKEND_RUNTIME_DEST="/usr/local/libexec/${APP}-backend"
+BACKEND_LIBRARY_DEST_DIR="/usr/local/libexec/${APP}-backend.d"
 COMMAND_DEST="/usr/local/sbin/${APP}"
 SERVICE_DEST="/etc/systemd/system/${APP}.service"
+BACKEND_SERVICE_DEST="/etc/systemd/system/${APP}-backend.service"
+DBUS_NAME="io.github.Uripeer3.GnomePowerProfileAutomation1"
+DBUS_XML_DEST="/usr/share/dbus-1/interfaces/${DBUS_NAME}.xml"
+DBUS_POLICY_DEST="/usr/share/dbus-1/system.d/${DBUS_NAME}.conf"
 CONFIG_DEST="/etc/${APP}.conf"
 CONFIG_BACKUP_DEST="${CONFIG_DEST}.legacy.bak"
 LID_DROPIN_DEST="/etc/systemd/logind.conf.d/90-${APP}-lid.conf"
 PURGE_CONFIG=false
 
 LIBRARY_NAMES=(config.sh policy.sh platform.sh lid.sh monitor.sh cli.sh)
+BACKEND_LIBRARY_NAMES=(backend_core.py backend_service.py)
 LIBRARY_DESTS=()
 for library in "${LIBRARY_NAMES[@]}"; do
     LIBRARY_DESTS+=("${LIBRARY_DEST_DIR}/${library}")
+done
+BACKEND_LIBRARY_DESTS=()
+for library in "${BACKEND_LIBRARY_NAMES[@]}"; do
+    BACKEND_LIBRARY_DESTS+=("${BACKEND_LIBRARY_DEST_DIR}/${library}")
 done
 
 usage() {
@@ -45,9 +56,20 @@ main() {
 
     (( EUID == 0 )) || die "Run this uninstaller with sudo."
 
-    systemctl disable --now "${APP}.service" 2>/dev/null || true
-    rm -f "$SERVICE_DEST" "$RUNTIME_DEST" "$COMMAND_DEST" "$LID_DROPIN_DEST" "${LIBRARY_DESTS[@]}"
+    systemctl disable --now "${APP}.service" "${APP}-backend.service" 2>/dev/null || true
+    rm -f \
+        "$SERVICE_DEST" \
+        "$BACKEND_SERVICE_DEST" \
+        "$RUNTIME_DEST" \
+        "$BACKEND_RUNTIME_DEST" \
+        "$COMMAND_DEST" \
+        "$LID_DROPIN_DEST" \
+        "$DBUS_XML_DEST" \
+        "$DBUS_POLICY_DEST" \
+        "${LIBRARY_DESTS[@]}" \
+        "${BACKEND_LIBRARY_DESTS[@]}"
     rmdir "$LIBRARY_DEST_DIR" 2>/dev/null || true
+    rmdir "$BACKEND_LIBRARY_DEST_DIR" 2>/dev/null || true
     rm -rf "/run/${APP}"
 
     if "$PURGE_CONFIG"; then
@@ -58,6 +80,9 @@ main() {
     fi
 
     systemctl daemon-reload
+    systemctl reload dbus-broker.service 2>/dev/null \
+        || systemctl reload dbus.service 2>/dev/null \
+        || true
     systemctl reload systemd-logind.service 2>/dev/null || true
     printf 'Removed %s.\n' "$APP"
 }

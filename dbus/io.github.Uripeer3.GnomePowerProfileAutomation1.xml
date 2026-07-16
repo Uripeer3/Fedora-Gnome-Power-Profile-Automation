@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<node>
+  <interface name="io.github.Uripeer3.GnomePowerProfileAutomation1">
+    <property name="ApiVersion" type="u" access="read"/>
+    <property name="BackendState" type="s" access="read"/>
+    <property name="PowerSource" type="s" access="read"/>
+    <property name="PolicyState" type="s" access="read"/>
+    <property name="ActiveProfile" type="s" access="read"/>
+    <property name="DesiredProfile" type="s" access="read"/>
+    <property name="LastError" type="s" access="read"/>
+
+    <method name="GetStatus">
+      <arg name="status" type="a{sv}" direction="out"/>
+    </method>
+    <method name="GetConfiguration">
+      <arg name="configuration" type="a{sv}" direction="out"/>
+    </method>
+
+    <signal name="StatusChanged">
+      <arg name="status" type="a{sv}"/>
+    </signal>
+    <signal name="ConfigurationChanged">
+      <arg name="configuration" type="a{sv}"/>
+    </signal>
+  </interface>
+</node>

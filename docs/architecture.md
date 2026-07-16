@@ -1,10 +1,10 @@
 # Target architecture and privilege model
 
-Status: proposed contract for the backend and GNOME extension roadmap.
+Status: target contract with rollout steps 1 and 2 implemented.
 
-This document defines the component boundaries that future implementation pull
-requests must preserve. It describes the target architecture, not the behavior
-of the current 1.2 Bash implementation.
+This document defines the component boundaries that implementation pull
+requests must preserve. The read-only backend is available alongside the
+legacy Bash monitor; mutation and monitor ownership have not moved yet.
 
 The corresponding public D-Bus contract is specified in
 [`dbus-api-v1.md`](dbus-api-v1.md).
@@ -218,9 +218,9 @@ policy owners remains unsupported.
 
 Implementation is intentionally incremental:
 
-1. Refactor the existing Bash executable along these boundaries without
-   changing behavior.
-2. Add a read-only backend API alongside the existing monitor.
+1. **Complete:** Refactor the existing Bash executable along these boundaries
+   without changing behavior.
+2. **Complete:** Add a read-only backend API alongside the existing monitor.
 3. Add authorized mutations.
 4. Convert the CLI into a D-Bus client.
 5. Transfer monitor ownership to the backend and remove the old authority.

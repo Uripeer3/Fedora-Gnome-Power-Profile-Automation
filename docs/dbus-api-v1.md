@@ -1,11 +1,18 @@
 # D-Bus API version 1
 
-Status: proposed public contract. The current 1.2 release does not implement
-this interface.
+Status: read-only subset implemented; authorized mutation methods remain
+planned.
 
 This interface is the only runtime boundary intended for the command-line
 client and future GNOME extension. Architecture and privilege decisions are in
 [`architecture.md`](architecture.md).
+
+The installed transitional backend currently implements all published
+properties, `GetStatus`, `GetConfiguration`, `StatusChanged`, and
+`ConfigurationChanged`. `SetConfiguration` and `ApplyPolicy` are intentionally
+absent until backend-side Polkit authorization and mutation serialization are
+implemented. The legacy Bash monitor remains the only policy writer during
+this stage.
 
 ## Identifiers
 

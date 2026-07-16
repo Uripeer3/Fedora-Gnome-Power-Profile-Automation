@@ -1,0 +1,14 @@
+[Unit]
+Description=GNOME Power Mode Automation read-only D-Bus backend
+After=dbus.service upower.service tuned-ppd.service
+Wants=upower.service tuned-ppd.service
+
+[Service]
+Type=dbus
+BusName=io.github.Uripeer3.GnomePowerProfileAutomation1
+ExecStart=/usr/local/libexec/gnome-power-profile-automation-backend
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
