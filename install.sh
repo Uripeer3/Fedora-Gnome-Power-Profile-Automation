@@ -8,10 +8,12 @@ APP="gnome-power-profile-automation"
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_SOURCE="${ROOT_DIR}/src/${APP}"
 POLICY_SOURCE="${ROOT_DIR}/src/lib/policy.sh"
+CONFIG_LIB_SOURCE="${ROOT_DIR}/src/lib/config.sh"
 SERVICE_SOURCE="${ROOT_DIR}/systemd/${APP}.service"
 CONFIG_SOURCE="${ROOT_DIR}/config/${APP}.conf.example"
 RUNTIME_DEST="/usr/local/libexec/${APP}"
 POLICY_DEST="/usr/local/libexec/${APP}.d/policy.sh"
+CONFIG_LIB_DEST="/usr/local/libexec/${APP}.d/config.sh"
 COMMAND_DEST="/usr/local/sbin/${APP}"
 SERVICE_DEST="/etc/systemd/system/${APP}.service"
 CONFIG_DEST="/etc/${APP}.conf"
@@ -44,6 +46,7 @@ check_source_files() {
     # install(1) sets the executable mode at the installed destination.
     [[ -r "$RUNTIME_SOURCE" ]] || die "Missing runtime: $RUNTIME_SOURCE"
     [[ -r "$POLICY_SOURCE" ]] || die "Missing policy library: $POLICY_SOURCE"
+    [[ -r "$CONFIG_LIB_SOURCE" ]] || die "Missing configuration library: $CONFIG_LIB_SOURCE"
     [[ -r "$SERVICE_SOURCE" ]] || die "Missing systemd unit: $SERVICE_SOURCE"
     [[ -r "$CONFIG_SOURCE" ]] || die "Missing config template: $CONFIG_SOURCE"
 }
@@ -68,6 +71,7 @@ normalize_config_permissions() {
 install_files() {
     install -D -m 0755 "$RUNTIME_SOURCE" "$RUNTIME_DEST"
     install -D -m 0644 "$POLICY_SOURCE" "$POLICY_DEST"
+    install -D -m 0644 "$CONFIG_LIB_SOURCE" "$CONFIG_LIB_DEST"
     install -D -m 0644 "$SERVICE_SOURCE" "$SERVICE_DEST"
     ln -sfn "$RUNTIME_DEST" "$COMMAND_DEST"
 
@@ -106,6 +110,7 @@ main() {
     check_source_files
     check_requirements
     install_files
+    "$COMMAND_DEST" migrate-config
 
     # A first interactive installation should offer the guided policy menu.
     # Existing configurations remain untouched unless --reconfigure is chosen.

@@ -2,10 +2,11 @@
 # Allowed profile values: performance, balanced, power-saver
 # UPower warning levels: 3=Low, 4=Critical, 5=Action
 # Lid close actions: suspend, hibernate, lock, ignore
-
-AC_PROFILE="performance"
-BATTERY_PROFILE="balanced"
-LOW_BATTERY_PROFILE="power-saver"
-LOW_BATTERY_WARNING_LEVEL=3
-LID_CLOSE_ON_BATTERY="suspend"
-LID_CLOSE_ON_AC="suspend"
+[Policy]
+Version=1
+ACProfile=performance
+BatteryProfile=balanced
+LowBatteryProfile=power-saver
+LowBatteryWarningLevel=3
+LidCloseOnBattery=suspend
+LidCloseOnAC=suspend
