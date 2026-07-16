@@ -4,6 +4,9 @@ set -Eeuo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 report_file="${root_dir}/.shell-quality-report.txt"
+export GNOME_POWER_PROFILE_AUTOMATION_LIB_DIR="${root_dir}/src/lib"
+export GNOME_POWER_PROFILE_AUTOMATION_CONFIG_LIB="${root_dir}/src/lib/config.sh"
+export GNOME_POWER_PROFILE_AUTOMATION_POLICY_LIB="${root_dir}/src/lib/policy.sh"
 executable_files=(
   "$root_dir/install.sh"
   "$root_dir/uninstall.sh"
@@ -12,9 +15,14 @@ executable_files=(
 )
 library_files=(
   "$root_dir/src/lib/config.sh"
+  "$root_dir/src/lib/cli.sh"
+  "$root_dir/src/lib/lid.sh"
+  "$root_dir/src/lib/monitor.sh"
+  "$root_dir/src/lib/platform.sh"
   "$root_dir/src/lib/policy.sh"
   "$root_dir/tests/test-config.sh"
   "$root_dir/tests/test-policy.sh"
+  "$root_dir/tests/test-runtime-modules.sh"
 )
 files=("${executable_files[@]}" "${library_files[@]}")
 
@@ -123,5 +131,6 @@ printf 'service refresh tests OK\n'
 
 bash "$root_dir/tests/test-policy.sh"
 bash "$root_dir/tests/test-config.sh"
+bash "$root_dir/tests/test-runtime-modules.sh"
 
 rm -f "$report_file"
