@@ -5,9 +5,10 @@
 set -Eeuo pipefail
 
 APP="gnome-power-profile-automation"
-VERSION="1.1.0"
+VERSION="1.2.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 POLICY_LIB="${GNOME_POWER_PROFILE_AUTOMATION_POLICY_LIB:-/usr/local/libexec/${APP}.d/policy.sh}"
+CONFIG_LIB="${GNOME_POWER_PROFILE_AUTOMATION_CONFIG_LIB:-/usr/local/libexec/${APP}.d/config.sh}"
 CONFIG="/etc/${APP}.conf"
 STATE_DIR="/run/${APP}"
 STATE_FILE="${STATE_DIR}/last-state"
@@ -52,9 +53,15 @@ log() { logger -t "$APP" -- "$*"; }
 if [[ ! -r "$POLICY_LIB" && -r "${SCRIPT_DIR}/lib/policy.sh" ]]; then
     POLICY_LIB="${SCRIPT_DIR}/lib/policy.sh"
 fi
+if [[ ! -r "$CONFIG_LIB" && -r "${SCRIPT_DIR}/lib/config.sh" ]]; then
+    CONFIG_LIB="${SCRIPT_DIR}/lib/config.sh"
+fi
 [[ -r "$POLICY_LIB" ]] || die "Missing policy library: $POLICY_LIB"
+[[ -r "$CONFIG_LIB" ]] || die "Missing configuration library: $CONFIG_LIB"
 # shellcheck source=lib/policy.sh
 source "$POLICY_LIB"
+# shellcheck source=lib/config.sh
+source "$CONFIG_LIB"
 
 usage() {
     cat <<EOF
@@ -68,6 +75,7 @@ Commands:
   status              Show power state, target profile, and lid policy.
   apply               Force the configured power-profile policy once now.
   sync-lid-policy     Apply configured lid-close actions through systemd-logind.
+  migrate-config      Safely migrate the legacy shell-style configuration.
   monitor             Run the UPower event monitor (used by systemd).
   help                Show this help text.
 
@@ -192,28 +200,36 @@ validate_config_permissions() {
     (( (8#$mode & 8#022) == 0 )) || die "Configuration must not be group- or world-writable: $CONFIG"
 }
 
-load_config() {
+set_config_defaults() {
+    CONFIG_VERSION="$CONFIG_SCHEMA_VERSION"
     AC_PROFILE="$DEFAULT_AC_PROFILE"
     BATTERY_PROFILE="$DEFAULT_BATTERY_PROFILE"
     LOW_BATTERY_PROFILE="$DEFAULT_LOW_PROFILE"
     LOW_BATTERY_WARNING_LEVEL="$DEFAULT_WARNING_LEVEL"
     LID_CLOSE_ON_BATTERY="$DEFAULT_LID_CLOSE_ON_BATTERY"
     LID_CLOSE_ON_AC="$DEFAULT_LID_CLOSE_ON_AC"
+}
 
-    [[ -r "$CONFIG" ]] || return 0
-    validate_config_permissions
-
-    # The installer creates this root-owned configuration file. Permission
-    # validation above ensures that untrusted users cannot inject shell code.
-    # shellcheck disable=SC1090
-    source "$CONFIG"
-
+validate_loaded_config() {
     validate_profile "$AC_PROFILE"
     validate_profile "$BATTERY_PROFILE"
     validate_profile "$LOW_BATTERY_PROFILE"
     [[ "$LOW_BATTERY_WARNING_LEVEL" =~ ^[3-5]$ ]] || die "LOW_BATTERY_WARNING_LEVEL must be 3, 4, or 5"
     validate_lid_action "$LID_CLOSE_ON_BATTERY"
     validate_lid_action "$LID_CLOSE_ON_AC"
+}
+
+load_config() {
+    local format
+    set_config_defaults
+
+    [[ -r "$CONFIG" ]] || return 0
+    validate_config_permissions
+    format="$(config_detect_format "$CONFIG")" || die "Invalid configuration format: $CONFIG"
+    [[ "$format" == current ]] \
+        || die "Legacy configuration detected. Run: sudo ${APP} migrate-config"
+    config_parse_current "$CONFIG" || die "Invalid versioned configuration: $CONFIG"
+    validate_loaded_config
 }
 
 write_lid_dropin() {
@@ -269,23 +285,37 @@ write_config() {
 
     temporary="$(mktemp "${CONFIG}.XXXXXX")" || die "Could not create a temporary configuration file."
 
-    cat > "$temporary" <<EOF
-# ${APP} configuration
-# Allowed profile values: performance, balanced, power-saver
-# UPower warning levels: 3=Low, 4=Critical, 5=Action
-# Lid close actions: suspend, hibernate, lock, ignore
-
-AC_PROFILE="${ac}"
-BATTERY_PROFILE="${battery}"
-LOW_BATTERY_PROFILE="${low}"
-LOW_BATTERY_WARNING_LEVEL=${warning}
-LID_CLOSE_ON_BATTERY="${lid_battery}"
-LID_CLOSE_ON_AC="${lid_ac}"
-EOF
+    config_render "$ac" "$battery" "$low" "$warning" "$lid_battery" "$lid_ac" > "$temporary"
 
     chown root:root "$temporary"
     chmod 0644 "$temporary"
     mv -f "$temporary" "$CONFIG"
+}
+
+migrate_config() {
+    local format backup
+
+    [[ -r "$CONFIG" ]] || return 0
+    validate_config_permissions
+    format="$(config_detect_format "$CONFIG")" || die "Invalid configuration format: $CONFIG"
+
+    if [[ "$format" == current ]]; then
+        set_config_defaults
+        config_parse_current "$CONFIG" || die "Invalid versioned configuration: $CONFIG"
+        validate_loaded_config
+        return 0
+    fi
+
+    set_config_defaults
+    config_parse_legacy "$CONFIG" || die "Legacy configuration could not be migrated safely: $CONFIG"
+    validate_loaded_config
+
+    backup="${CONFIG}.legacy.bak"
+    [[ ! -e "$backup" ]] || die "Migration backup already exists: $backup"
+    install -m 0600 -o root -g root "$CONFIG" "$backup"
+    write_config "$AC_PROFILE" "$BATTERY_PROFILE" "$LOW_BATTERY_PROFILE" \
+        "$LOW_BATTERY_WARNING_LEVEL" "$LID_CLOSE_ON_BATTERY" "$LID_CLOSE_ON_AC"
+    success "Migrated configuration to schema version ${CONFIG_SCHEMA_VERSION}. Backup: $backup"
 }
 
 require_ppd_api() {
@@ -563,6 +593,7 @@ main() {
         status) require_root; show_status ;;
         apply) require_root; load_config; require_ppd_api; apply_policy --force ;;
         sync-lid-policy) require_root; sync_lid_policy ;;
+        migrate-config) require_root; migrate_config ;;
         monitor) require_root; monitor ;;
         help|-h|--help) usage ;;
         --version) printf '%s\n' "$VERSION" ;;
