@@ -315,9 +315,9 @@ This project is intentionally narrower than TLP, not a claim that it is universa
 ```text
 .
 |-- config/       Default configuration template
-|-- src/          Installed command and UPower monitor runtime
+|-- src/          Installed command, UPower monitor, and pure policy library
 |-- systemd/       Systemd unit file
-|-- tests/         Syntax and ShellCheck validation
+|-- tests/         Syntax, ShellCheck, and policy behavior validation
 |-- tools/         Read-only development and troubleshooting utilities
 |-- install.sh     Installer
 |-- uninstall.sh   Uninstaller
