@@ -11,7 +11,9 @@ executable_files=(
   "$root_dir/tools/watch-power-profile-backend.sh"
 )
 library_files=(
+  "$root_dir/src/lib/config.sh"
   "$root_dir/src/lib/policy.sh"
+  "$root_dir/tests/test-config.sh"
   "$root_dir/tests/test-policy.sh"
 )
 files=("${executable_files[@]}" "${library_files[@]}")
@@ -120,5 +122,6 @@ test_install_restarts_installed_runtime
 printf 'service refresh tests OK\n'
 
 bash "$root_dir/tests/test-policy.sh"
+bash "$root_dir/tests/test-config.sh"
 
 rm -f "$report_file"
