@@ -8,9 +8,11 @@ APP="gnome-power-profile-automation"
 RUNTIME_DEST="/usr/local/libexec/${APP}"
 POLICY_DIR_DEST="/usr/local/libexec/${APP}.d"
 POLICY_DEST="${POLICY_DIR_DEST}/policy.sh"
+CONFIG_LIB_DEST="${POLICY_DIR_DEST}/config.sh"
 COMMAND_DEST="/usr/local/sbin/${APP}"
 SERVICE_DEST="/etc/systemd/system/${APP}.service"
 CONFIG_DEST="/etc/${APP}.conf"
+CONFIG_BACKUP_DEST="${CONFIG_DEST}.legacy.bak"
 LID_DROPIN_DEST="/etc/systemd/logind.conf.d/90-${APP}-lid.conf"
 PURGE_CONFIG=false
 
@@ -40,13 +42,13 @@ main() {
     (( EUID == 0 )) || die "Run this uninstaller with sudo."
 
     systemctl disable --now "${APP}.service" 2>/dev/null || true
-    rm -f "$SERVICE_DEST" "$RUNTIME_DEST" "$POLICY_DEST" "$COMMAND_DEST" "$LID_DROPIN_DEST"
+    rm -f "$SERVICE_DEST" "$RUNTIME_DEST" "$POLICY_DEST" "$CONFIG_LIB_DEST" "$COMMAND_DEST" "$LID_DROPIN_DEST"
     rmdir "$POLICY_DIR_DEST" 2>/dev/null || true
     rm -rf "/run/${APP}"
 
     if "$PURGE_CONFIG"; then
-        rm -f "$CONFIG_DEST"
-        printf 'Removed configuration: %s\n' "$CONFIG_DEST"
+        rm -f "$CONFIG_DEST" "$CONFIG_BACKUP_DEST"
+        printf 'Removed configuration and migration backup.\n'
     else
         printf 'Kept configuration: %s\n' "$CONFIG_DEST"
     fi
