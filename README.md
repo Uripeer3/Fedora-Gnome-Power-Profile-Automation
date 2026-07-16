@@ -320,7 +320,7 @@ This project is intentionally narrower than TLP, not a claim that it is universa
 .
 |-- config/       Default configuration template
 |-- docs/         Target architecture and versioned D-Bus contract
-|-- src/          Installed command, UPower monitor, and pure policy library
+|-- src/          Thin installed command and focused runtime libraries
 |-- systemd/       Systemd unit file
 |-- tests/         Syntax, ShellCheck, and policy behavior validation
 |-- tools/         Read-only development and troubleshooting utilities
@@ -330,6 +330,11 @@ This project is intentionally narrower than TLP, not a claim that it is universa
 ```
 
 The files are intentionally separated. The installer copies tracked source files rather than generating a long program through nested heredocs, making changes easier to review, test, package, and upgrade.
+
+The installed command only initializes shared context, loads the libraries, and
+dispatches commands. Configuration persistence, platform access, lid policy,
+monitoring, terminal UI, and pure policy decisions live in separate files under
+`src/lib/` so later backend work can replace one boundary at a time.
 
 ## Target extension architecture
 
