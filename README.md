@@ -319,6 +319,7 @@ This project is intentionally narrower than TLP, not a claim that it is universa
 ```text
 .
 |-- config/       Default configuration template
+|-- docs/         Target architecture and versioned D-Bus contract
 |-- src/          Installed command, UPower monitor, and pure policy library
 |-- systemd/       Systemd unit file
 |-- tests/         Syntax, ShellCheck, and policy behavior validation
@@ -329,6 +330,19 @@ This project is intentionally narrower than TLP, not a claim that it is universa
 ```
 
 The files are intentionally separated. The installer copies tracked source files rather than generating a long program through nested heredocs, making changes easier to review, test, package, and upgrade.
+
+## Target extension architecture
+
+The current 1.2 implementation is a root-owned Bash service. The planned GNOME
+extension will instead be an unprivileged client of a narrow system backend; it
+will never edit `/etc`, invoke `systemctl`, or set system-wide D-Bus properties
+directly.
+
+- [Target architecture and privilege model](docs/architecture.md)
+- [D-Bus API version 1](docs/dbus-api-v1.md)
+
+These documents define the contract for upcoming refactor and backend work.
+They do not describe an interface implemented by the current release.
 
 ## Development
 
