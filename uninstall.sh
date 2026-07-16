@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Remove GNOME Power Mode Automation from Fedora.
 
 set -Eeuo pipefail
@@ -9,6 +9,7 @@ RUNTIME_DEST="/usr/local/libexec/${APP}"
 COMMAND_DEST="/usr/local/sbin/${APP}"
 SERVICE_DEST="/etc/systemd/system/${APP}.service"
 CONFIG_DEST="/etc/${APP}.conf"
+LID_DROPIN_DEST="/etc/systemd/logind.conf.d/90-${APP}-lid.conf"
 PURGE_CONFIG=false
 
 usage() {
@@ -37,7 +38,7 @@ main() {
     (( EUID == 0 )) || die "Run this uninstaller with sudo."
 
     systemctl disable --now "${APP}.service" 2>/dev/null || true
-    rm -f "$SERVICE_DEST" "$RUNTIME_DEST" "$COMMAND_DEST"
+    rm -f "$SERVICE_DEST" "$RUNTIME_DEST" "$COMMAND_DEST" "$LID_DROPIN_DEST"
     rm -rf "/run/${APP}"
 
     if "$PURGE_CONFIG"; then
@@ -48,6 +49,7 @@ main() {
     fi
 
     systemctl daemon-reload
+    systemctl reload systemd-logind.service 2>/dev/null || true
     printf 'Removed %s.\n' "$APP"
 }
 

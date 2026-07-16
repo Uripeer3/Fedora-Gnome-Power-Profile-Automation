@@ -5,10 +5,12 @@
 set -Eeuo pipefail
 
 APP="gnome-power-profile-automation"
-VERSION="1.0.0"
+VERSION="1.1.0"
 CONFIG="/etc/${APP}.conf"
 STATE_DIR="/run/${APP}"
 STATE_FILE="${STATE_DIR}/last-state"
+LOGIND_DROPIN_DIR="/etc/systemd/logind.conf.d"
+LOGIND_DROPIN="${LOGIND_DROPIN_DIR}/90-${APP}-lid.conf"
 
 UP_DEST="org.freedesktop.UPower"
 UP_PATH="/org/freedesktop/UPower"
@@ -24,6 +26,8 @@ DEFAULT_AC_PROFILE="performance"
 DEFAULT_BATTERY_PROFILE="balanced"
 DEFAULT_LOW_PROFILE="power-saver"
 DEFAULT_WARNING_LEVEL="3"
+DEFAULT_LID_CLOSE_ON_BATTERY="suspend"
+DEFAULT_LID_CLOSE_ON_AC="suspend"
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]] && command -v tput >/dev/null 2>&1; then
     BOLD="$(tput bold)"
@@ -52,14 +56,16 @@ Usage:
 
 Commands:
   configure [--yes]   Open the guided policy configuration menu.
-  status              Show power state, target profile, and current GNOME mode.
-  apply               Force the configured policy once now.
+  status              Show power state, target profile, and lid policy.
+  apply               Force the configured power-profile policy once now.
+  sync-lid-policy     Apply configured lid-close actions through systemd-logind.
   monitor             Run the UPower event monitor (used by systemd).
   help                Show this help text.
 
 The monitor preserves a temporary manual GNOME choice while the physical
-power state is unchanged. It applies policy again only on AC, battery, or
-low-battery state transitions.
+power state is unchanged. It applies profile policy again only on AC, battery,
+or low-battery state transitions. Lid-close policy is applied by systemd-logind
+and does not add another background monitor.
 EOF
 }
 
@@ -73,11 +79,28 @@ validate_profile() {
     esac
 }
 
+validate_lid_action() {
+    case "$1" in
+        suspend|hibernate|lock|ignore) ;;
+        *) die "Unsupported lid-close action: $1" ;;
+    esac
+}
+
 profile_label() {
     case "$1" in
         performance) printf 'Performance' ;;
         balanced) printf 'Balanced' ;;
         power-saver) printf 'Power Saver' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+lid_action_label() {
+    case "$1" in
+        suspend) printf 'Suspend' ;;
+        hibernate) printf 'Hibernate' ;;
+        lock) printf 'Lock screen' ;;
+        ignore) printf 'Do nothing' ;;
         *) printf '%s' "$1" ;;
     esac
 }
@@ -118,6 +141,26 @@ choice_to_warning() {
     esac
 }
 
+lid_action_to_choice() {
+    case "$1" in
+        suspend) printf 1 ;;
+        hibernate) printf 2 ;;
+        lock) printf 3 ;;
+        ignore) printf 4 ;;
+        *) printf 1 ;;
+    esac
+}
+
+choice_to_lid_action() {
+    case "$1" in
+        1) printf 'suspend' ;;
+        2) printf 'hibernate' ;;
+        3) printf 'lock' ;;
+        4) printf 'ignore' ;;
+        *) return 1 ;;
+    esac
+}
+
 warning_label() {
     case "$1" in
         0) printf 'Unknown' ;;
@@ -145,6 +188,8 @@ load_config() {
     BATTERY_PROFILE="$DEFAULT_BATTERY_PROFILE"
     LOW_BATTERY_PROFILE="$DEFAULT_LOW_PROFILE"
     LOW_BATTERY_WARNING_LEVEL="$DEFAULT_WARNING_LEVEL"
+    LID_CLOSE_ON_BATTERY="$DEFAULT_LID_CLOSE_ON_BATTERY"
+    LID_CLOSE_ON_AC="$DEFAULT_LID_CLOSE_ON_AC"
 
     [[ -r "$CONFIG" ]] || return 0
     validate_config_permissions
@@ -158,14 +203,50 @@ load_config() {
     validate_profile "$BATTERY_PROFILE"
     validate_profile "$LOW_BATTERY_PROFILE"
     [[ "$LOW_BATTERY_WARNING_LEVEL" =~ ^[3-5]$ ]] || die "LOW_BATTERY_WARNING_LEVEL must be 3, 4, or 5"
+    validate_lid_action "$LID_CLOSE_ON_BATTERY"
+    validate_lid_action "$LID_CLOSE_ON_AC"
+}
+
+write_lid_dropin() {
+    local battery_action="$1" ac_action="$2" temporary
+    validate_lid_action "$battery_action"
+    validate_lid_action "$ac_action"
+
+    install -d -m 0755 "$LOGIND_DROPIN_DIR"
+    temporary="$(mktemp "${LOGIND_DROPIN}.XXXXXX")" || die "Could not create a temporary lid policy file."
+
+    cat > "$temporary" <<EOF
+# Managed by ${APP}. Edit ${CONFIG}, then run:
+#   sudo ${APP} sync-lid-policy
+[Login]
+HandleLidSwitch=${battery_action}
+HandleLidSwitchExternalPower=${ac_action}
+EOF
+
+    chown root:root "$temporary"
+    chmod 0644 "$temporary"
+    mv -f "$temporary" "$LOGIND_DROPIN"
+
+    if ! systemctl reload systemd-logind.service; then
+        warn "Lid policy was written, but systemd-logind could not be reloaded. Reboot to apply it."
+    fi
+}
+
+sync_lid_policy() {
+    require_command systemctl
+    load_config
+    write_lid_dropin "$LID_CLOSE_ON_BATTERY" "$LID_CLOSE_ON_AC"
+    success "Applied lid-close policy: battery=$(lid_action_label "$LID_CLOSE_ON_BATTERY"), AC=$(lid_action_label "$LID_CLOSE_ON_AC")"
 }
 
 write_config() {
-    local ac="$1" battery="$2" low="$3" warning="$4" temporary
+    local ac="$1" battery="$2" low="$3" warning="$4" lid_battery="$5" lid_ac="$6" temporary
     validate_profile "$ac"
     validate_profile "$battery"
     validate_profile "$low"
     [[ "$warning" =~ ^[3-5]$ ]] || die "Invalid UPower warning level: $warning"
+    validate_lid_action "$lid_battery"
+    validate_lid_action "$lid_ac"
 
     temporary="$(mktemp "${CONFIG}.XXXXXX")" || die "Could not create a temporary configuration file."
 
@@ -173,11 +254,14 @@ write_config() {
 # ${APP} configuration
 # Allowed profile values: performance, balanced, power-saver
 # UPower warning levels: 3=Low, 4=Critical, 5=Action
+# Lid close actions: suspend, hibernate, lock, ignore
 
 AC_PROFILE="${ac}"
 BATTERY_PROFILE="${battery}"
 LOW_BATTERY_PROFILE="${low}"
 LOW_BATTERY_WARNING_LEVEL=${warning}
+LID_CLOSE_ON_BATTERY="${lid_battery}"
+LID_CLOSE_ON_AC="${lid_ac}"
 EOF
 
     chown root:root "$temporary"
@@ -270,15 +354,18 @@ show_status() {
 
     say "GNOME Power Mode Automation"
     say "------------------------------------------------------------"
-    printf 'Detected power state : %s\n' "$state"
-    printf 'Battery percentage   : %s\n' "$percentage"
-    printf 'UPower warning level : %s (%s)\n' "$warning" "$(warning_label "$warning")"
-    printf 'Configured target    : %s\n' "$(profile_label "$target")"
-    printf 'Current GNOME mode   : %s\n' "$(profile_label "$active")"
+    printf 'Detected power state   : %s\n' "$state"
+    printf 'Battery percentage     : %s\n' "$percentage"
+    printf 'UPower warning level   : %s (%s)\n' "$warning" "$(warning_label "$warning")"
+    printf 'Configured target      : %s\n' "$(profile_label "$target")"
+    printf 'Current GNOME mode     : %s\n' "$(profile_label "$active")"
+    printf 'Lid close on battery   : %s\n' "$(lid_action_label "$LID_CLOSE_ON_BATTERY")"
+    printf 'Lid close on AC        : %s\n' "$(lid_action_label "$LID_CLOSE_ON_AC")"
 }
 
 SELECTED_PROFILE=""
 SELECTED_WARNING=""
+SELECTED_LID_ACTION=""
 
 choose_profile() {
     local heading="$1" explanation="$2" current="$3" default choice selected
@@ -333,8 +420,38 @@ choose_warning() {
     done
 }
 
+choose_lid_action() {
+    local heading="$1" explanation="$2" current="$3" default choice selected
+    default="$(lid_action_to_choice "$current")"
+
+    say
+    say "${BOLD}${heading}${RESET}"
+    say "$explanation"
+    say
+    say "  1) Suspend (recommended)"
+    say "     Sleep until the lid opens or another wake event occurs."
+    say "  2) Hibernate"
+    say "     Save memory to disk, then power down. Requires working hibernation."
+    say "  3) Lock screen"
+    say "     Keep the system running and ask the desktop session to lock."
+    say "  4) Do nothing"
+    say "     Leave the system running after the lid closes."
+    say
+
+    while true; do
+        printf 'Choose 1, 2, 3, or 4 [default: %s]: ' "$default"
+        read -r choice
+        choice="${choice:-$default}"
+        if selected="$(choice_to_lid_action "$choice")"; then
+            SELECTED_LID_ACTION="$selected"
+            return
+        fi
+        warn "Please enter 1, 2, 3, or 4."
+    done
+}
+
 configure() {
-    local use_defaults=false ac battery low warning answer
+    local use_defaults=false ac battery low warning lid_battery lid_ac answer
     while (( $# > 0 )); do
         case "$1" in
             -y|--yes) use_defaults=true ;;
@@ -345,44 +462,63 @@ configure() {
     done
 
     if "$use_defaults"; then
-        write_config "$DEFAULT_AC_PROFILE" "$DEFAULT_BATTERY_PROFILE" "$DEFAULT_LOW_PROFILE" "$DEFAULT_WARNING_LEVEL"
+        write_config \
+            "$DEFAULT_AC_PROFILE" \
+            "$DEFAULT_BATTERY_PROFILE" \
+            "$DEFAULT_LOW_PROFILE" \
+            "$DEFAULT_WARNING_LEVEL" \
+            "$DEFAULT_LID_CLOSE_ON_BATTERY" \
+            "$DEFAULT_LID_CLOSE_ON_AC"
+        sync_lid_policy
         success "Configured recommended defaults in $CONFIG"
         return
     fi
 
     [[ -t 0 ]] || die "Interactive configuration requires a terminal. Use configure --yes instead."
     load_config
-    ac="$AC_PROFILE"; battery="$BATTERY_PROFILE"; low="$LOW_BATTERY_PROFILE"; warning="$LOW_BATTERY_WARNING_LEVEL"
+    ac="$AC_PROFILE"
+    battery="$BATTERY_PROFILE"
+    low="$LOW_BATTERY_PROFILE"
+    warning="$LOW_BATTERY_WARNING_LEVEL"
+    lid_battery="$LID_CLOSE_ON_BATTERY"
+    lid_ac="$LID_CLOSE_ON_AC"
 
     say
     say "${BOLD}${BLUE}GNOME Power Mode Automation${RESET}"
     say "------------------------------------------------------------"
-    say "Choose the visible GNOME mode for each physical power state."
-    say "Manual GNOME changes are preserved until the next state transition."
+    say "Choose the visible GNOME mode and lid-close action for each state."
+    say "Manual GNOME changes are preserved until the next power-state transition."
 
-    choose_profile "1 of 3: Charger connected" "Mode to apply after connecting AC power." "$ac"
+    choose_profile "1 of 5: Charger connected" "Mode to apply after connecting AC power." "$ac"
     ac="$SELECTED_PROFILE"
-    choose_profile "2 of 3: Normal battery" "Mode to apply after disconnecting AC power." "$battery"
+    choose_profile "2 of 5: Normal battery" "Mode to apply after disconnecting AC power." "$battery"
     battery="$SELECTED_PROFILE"
-    choose_profile "3 of 3: Low battery" "Mode to apply when UPower reports low battery." "$low"
+    choose_profile "3 of 5: Low battery" "Mode to apply when UPower reports low battery." "$low"
     low="$SELECTED_PROFILE"
     choose_warning "$warning"
     warning="$SELECTED_WARNING"
+    choose_lid_action "4 of 5: Lid close on battery" "Action used by systemd-logind while on battery." "$lid_battery"
+    lid_battery="$SELECTED_LID_ACTION"
+    choose_lid_action "5 of 5: Lid close on AC power" "Action used by systemd-logind while external power is connected." "$lid_ac"
+    lid_ac="$SELECTED_LID_ACTION"
 
     say
     say "${BOLD}Selected policy${RESET}"
     say "------------------------------------------------------------"
-    printf '  Charger connected : %s\n' "$(profile_label "$ac")"
-    printf '  Normal battery    : %s\n' "$(profile_label "$battery")"
-    printf '  Low battery       : %s\n' "$(profile_label "$low")"
-    printf '  Low trigger       : %s\n' "$(warning_label "$warning")"
+    printf '  Charger connected     : %s\n' "$(profile_label "$ac")"
+    printf '  Normal battery        : %s\n' "$(profile_label "$battery")"
+    printf '  Low battery           : %s\n' "$(profile_label "$low")"
+    printf '  Low trigger           : %s\n' "$(warning_label "$warning")"
+    printf '  Lid close on battery  : %s\n' "$(lid_action_label "$lid_battery")"
+    printf '  Lid close on AC       : %s\n' "$(lid_action_label "$lid_ac")"
     say
 
     printf 'Save this policy? [Y/n]: '
     read -r answer
     case "${answer:-Y}" in
         y|Y|yes|YES)
-            write_config "$ac" "$battery" "$low" "$warning"
+            write_config "$ac" "$battery" "$low" "$warning" "$lid_battery" "$lid_ac"
+            sync_lid_policy
             success "Configuration saved to $CONFIG"
             ;;
         *) info "Cancelled. No configuration changes were made." ;;
@@ -411,6 +547,7 @@ main() {
         configure) require_root; configure "$@" ;;
         status) require_root; show_status ;;
         apply) require_root; load_config; require_ppd_api; apply_policy --force ;;
+        sync-lid-policy) require_root; sync_lid_policy ;;
         monitor) require_root; monitor ;;
         help|-h|--help) usage ;;
         --version) printf '%s\n' "$VERSION" ;;
