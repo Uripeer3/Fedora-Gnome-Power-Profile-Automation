@@ -46,8 +46,6 @@ config_parse_current() {
         [[ -z "${seen[$key]:-}" ]] || return 2
         seen["$key"]=1
 
-        # These variables are the parser's output API and are consumed by callers.
-        # shellcheck disable=SC2034
         case "$key" in
             Version) CONFIG_VERSION="$value" ;;
             ACProfile) AC_PROFILE="$value" ;;
@@ -96,6 +94,8 @@ config_parse_legacy() {
         value="$(config_decode_legacy_value "$raw")" || return 2
         seen["$key"]=1
 
+        # These variables are the parser's output API and are consumed by callers.
+        # shellcheck disable=SC2034
         case "$key" in
             AC_PROFILE) AC_PROFILE="$value" ;;
             BATTERY_PROFILE) BATTERY_PROFILE="$value" ;;
