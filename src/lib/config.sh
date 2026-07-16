@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Strict parsers and renderer for the versioned policy configuration format.
+# Shared paths, defaults, and output helpers are provided by the entrypoint.
+# shellcheck disable=SC2154
 
 CONFIG_SCHEMA_VERSION=1
 
@@ -127,4 +129,101 @@ LowBatteryWarningLevel=${warning}
 LidCloseOnBattery=${lid_battery}
 LidCloseOnAC=${lid_ac}
 EOF
+}
+
+validate_profile() {
+    case "$1" in
+        performance|balanced|power-saver) ;;
+        *) die "Unsupported profile: $1" ;;
+    esac
+}
+
+validate_lid_action() {
+    case "$1" in
+        suspend|hibernate|lock|ignore) ;;
+        *) die "Unsupported lid-close action: $1" ;;
+    esac
+}
+
+validate_config_permissions() {
+    local owner mode
+
+    owner="$(stat -c '%u' "$CONFIG")" || die "Cannot read configuration ownership: $CONFIG"
+    mode="$(stat -c '%a' "$CONFIG")" || die "Cannot read configuration mode: $CONFIG"
+
+    [[ "$owner" == "0" ]] || die "Configuration must be owned by root: $CONFIG"
+    (( (8#$mode & 8#022) == 0 )) || die "Configuration must not be group- or world-writable: $CONFIG"
+}
+
+set_config_defaults() {
+    AC_PROFILE="$DEFAULT_AC_PROFILE"
+    BATTERY_PROFILE="$DEFAULT_BATTERY_PROFILE"
+    LOW_BATTERY_PROFILE="$DEFAULT_LOW_PROFILE"
+    LOW_BATTERY_WARNING_LEVEL="$DEFAULT_WARNING_LEVEL"
+    LID_CLOSE_ON_BATTERY="$DEFAULT_LID_CLOSE_ON_BATTERY"
+    LID_CLOSE_ON_AC="$DEFAULT_LID_CLOSE_ON_AC"
+}
+
+validate_loaded_config() {
+    validate_profile "$AC_PROFILE"
+    validate_profile "$BATTERY_PROFILE"
+    validate_profile "$LOW_BATTERY_PROFILE"
+    [[ "$LOW_BATTERY_WARNING_LEVEL" =~ ^[3-5]$ ]] || die "LOW_BATTERY_WARNING_LEVEL must be 3, 4, or 5"
+    validate_lid_action "$LID_CLOSE_ON_BATTERY"
+    validate_lid_action "$LID_CLOSE_ON_AC"
+}
+
+load_config() {
+    local format
+    set_config_defaults
+
+    [[ -r "$CONFIG" ]] || return 0
+    validate_config_permissions
+    format="$(config_detect_format "$CONFIG")" || die "Invalid configuration format: $CONFIG"
+    [[ "$format" == current ]] \
+        || die "Legacy configuration detected. Run: sudo ${APP} migrate-config"
+    config_parse_current "$CONFIG" || die "Invalid versioned configuration: $CONFIG"
+    validate_loaded_config
+}
+
+write_config() {
+    local ac="$1" battery="$2" low="$3" warning="$4" lid_battery="$5" lid_ac="$6" temporary
+    validate_profile "$ac"
+    validate_profile "$battery"
+    validate_profile "$low"
+    [[ "$warning" =~ ^[3-5]$ ]] || die "Invalid UPower warning level: $warning"
+    validate_lid_action "$lid_battery"
+    validate_lid_action "$lid_ac"
+
+    temporary="$(mktemp "${CONFIG}.XXXXXX")" || die "Could not create a temporary configuration file."
+    config_render "$ac" "$battery" "$low" "$warning" "$lid_battery" "$lid_ac" > "$temporary"
+    chown root:root "$temporary"
+    chmod 0644 "$temporary"
+    mv -f "$temporary" "$CONFIG"
+}
+
+migrate_config() {
+    local format backup
+
+    [[ -r "$CONFIG" ]] || return 0
+    validate_config_permissions
+    format="$(config_detect_format "$CONFIG")" || die "Invalid configuration format: $CONFIG"
+
+    if [[ "$format" == current ]]; then
+        set_config_defaults
+        config_parse_current "$CONFIG" || die "Invalid versioned configuration: $CONFIG"
+        validate_loaded_config
+        return 0
+    fi
+
+    set_config_defaults
+    config_parse_legacy "$CONFIG" || die "Legacy configuration could not be migrated safely: $CONFIG"
+    validate_loaded_config
+
+    backup="${CONFIG}.legacy.bak"
+    [[ ! -e "$backup" ]] || die "Migration backup already exists: $backup"
+    install -m 0600 -o root -g root "$CONFIG" "$backup"
+    write_config "$AC_PROFILE" "$BATTERY_PROFILE" "$LOW_BATTERY_PROFILE" \
+        "$LOW_BATTERY_WARNING_LEVEL" "$LID_CLOSE_ON_BATTERY" "$LID_CLOSE_ON_AC"
+    success "Migrated configuration to schema version ${CONFIG_SCHEMA_VERSION}. Backup: $backup"
 }
