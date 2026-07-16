@@ -1,4 +1,7 @@
 # GNOME Power Mode Automation configuration
+# Allowed profile values: performance, balanced, power-saver
+# UPower warning levels: 3=Low, 4=Critical, 5=Action
+# Lid close actions: suspend, hibernate, lock, ignore
 [Policy]
 Version=1
 ACProfile=performance
