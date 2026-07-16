@@ -4,20 +4,27 @@ set -Eeuo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 report_file="${root_dir}/.shell-quality-report.txt"
-files=(
+executable_files=(
   "$root_dir/install.sh"
   "$root_dir/uninstall.sh"
   "$root_dir/src/gnome-power-profile-automation"
   "$root_dir/tools/watch-power-profile-backend.sh"
 )
+library_files=(
+  "$root_dir/src/lib/policy.sh"
+  "$root_dir/tests/test-policy.sh"
+)
+files=("${executable_files[@]}" "${library_files[@]}")
 
 : > "$report_file"
 
-for file in "${files[@]}"; do
+for file in "${executable_files[@]}"; do
   if [[ ! -x "$file" ]]; then
     printf 'Expected an executable Git file mode: %s\n' "$file" >> "$report_file"
   fi
+done
 
+for file in "${files[@]}"; do
   if ! bash -n "$file" 2>> "$report_file"; then
     printf 'Bash syntax check failed for: %s\n' "$file" >&2
     cat "$report_file" >&2
@@ -111,5 +118,7 @@ test_configure_restarts_active_monitor
 test_configure_leaves_inactive_monitor_stopped
 test_install_restarts_installed_runtime
 printf 'service refresh tests OK\n'
+
+bash "$root_dir/tests/test-policy.sh"
 
 rm -f "$report_file"

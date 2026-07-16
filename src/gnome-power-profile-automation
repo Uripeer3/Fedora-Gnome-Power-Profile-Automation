@@ -6,6 +6,8 @@ set -Eeuo pipefail
 
 APP="gnome-power-profile-automation"
 VERSION="1.1.0"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+POLICY_LIB="${GNOME_POWER_PROFILE_AUTOMATION_POLICY_LIB:-/usr/local/libexec/${APP}.d/policy.sh}"
 CONFIG="/etc/${APP}.conf"
 STATE_DIR="/run/${APP}"
 STATE_FILE="${STATE_DIR}/last-state"
@@ -46,6 +48,13 @@ success() { printf '%sOK:%s %s\n' "$GREEN" "$RESET" "$*"; }
 warn() { printf '%sWARNING:%s %s\n' "$YELLOW" "$RESET" "$*" >&2; }
 die() { printf '%sERROR:%s %s\n' "$RED" "$RESET" "$*" >&2; logger -t "$APP" -- "ERROR: $*"; exit 1; }
 log() { logger -t "$APP" -- "$*"; }
+
+if [[ ! -r "$POLICY_LIB" && -r "${SCRIPT_DIR}/lib/policy.sh" ]]; then
+    POLICY_LIB="${SCRIPT_DIR}/lib/policy.sh"
+fi
+[[ -r "$POLICY_LIB" ]] || die "Missing policy library: $POLICY_LIB"
+# shellcheck source=lib/policy.sh
+source "$POLICY_LIB"
 
 usage() {
     cat <<EOF
@@ -313,26 +322,20 @@ battery_percentage() {
 }
 
 desired_state() {
-    local warning
-    if ! on_battery; then
-        printf 'ac\n'
-        return
+    local battery_state warning
+    if on_battery; then
+        battery_state=true
+    else
+        battery_state=false
     fi
     warning="$(warning_level)"
-    if (( warning >= LOW_BATTERY_WARNING_LEVEL )); then
-        printf 'low-battery\n'
-    else
-        printf 'battery\n'
-    fi
+    policy_state_for_inputs "$battery_state" "$warning" "$LOW_BATTERY_WARNING_LEVEL" \
+        || die "Could not classify power state from UPower values."
 }
 
 profile_for_state() {
-    case "$1" in
-        ac) printf '%s\n' "$AC_PROFILE" ;;
-        battery) printf '%s\n' "$BATTERY_PROFILE" ;;
-        low-battery) printf '%s\n' "$LOW_BATTERY_PROFILE" ;;
-        *) die "Unknown state: $1" ;;
-    esac
+    policy_profile_for_state "$1" "$AC_PROFILE" "$BATTERY_PROFILE" "$LOW_BATTERY_PROFILE" \
+        || die "Unknown state: $1"
 }
 
 apply_policy() {
@@ -343,7 +346,7 @@ apply_policy() {
     [[ -r "$STATE_FILE" ]] && last_state="$(<"$STATE_FILE")"
 
     # Avoid clobbering a manual GNOME choice while the physical state is unchanged.
-    if [[ "$force" != "--force" && "$state" == "$last_state" ]]; then
+    if ! policy_should_apply_state "$force" "$state" "$last_state"; then
         return 0
     fi
 

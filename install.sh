@@ -7,9 +7,11 @@ set -Eeuo pipefail
 APP="gnome-power-profile-automation"
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_SOURCE="${ROOT_DIR}/src/${APP}"
+POLICY_SOURCE="${ROOT_DIR}/src/lib/policy.sh"
 SERVICE_SOURCE="${ROOT_DIR}/systemd/${APP}.service"
 CONFIG_SOURCE="${ROOT_DIR}/config/${APP}.conf.example"
 RUNTIME_DEST="/usr/local/libexec/${APP}"
+POLICY_DEST="/usr/local/libexec/${APP}.d/policy.sh"
 COMMAND_DEST="/usr/local/sbin/${APP}"
 SERVICE_DEST="/etc/systemd/system/${APP}.service"
 CONFIG_DEST="/etc/${APP}.conf"
@@ -41,6 +43,7 @@ require_root() {
 check_source_files() {
     # install(1) sets the executable mode at the installed destination.
     [[ -r "$RUNTIME_SOURCE" ]] || die "Missing runtime: $RUNTIME_SOURCE"
+    [[ -r "$POLICY_SOURCE" ]] || die "Missing policy library: $POLICY_SOURCE"
     [[ -r "$SERVICE_SOURCE" ]] || die "Missing systemd unit: $SERVICE_SOURCE"
     [[ -r "$CONFIG_SOURCE" ]] || die "Missing config template: $CONFIG_SOURCE"
 }
@@ -64,6 +67,7 @@ normalize_config_permissions() {
 
 install_files() {
     install -D -m 0755 "$RUNTIME_SOURCE" "$RUNTIME_DEST"
+    install -D -m 0644 "$POLICY_SOURCE" "$POLICY_DEST"
     install -D -m 0644 "$SERVICE_SOURCE" "$SERVICE_DEST"
     ln -sfn "$RUNTIME_DEST" "$COMMAND_DEST"
 
