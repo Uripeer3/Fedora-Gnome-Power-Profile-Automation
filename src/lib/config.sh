@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Strict parsers and renderer for the versioned policy configuration format.
-# Shared paths, defaults, and output helpers are provided by the entrypoint.
+# The application identity and output helpers are provided by the entrypoint.
 # shellcheck disable=SC2154
 
 CONFIG_SCHEMA_VERSION=1
+CONFIG="/etc/gnome-power-profile-automation.conf"
+
+DEFAULT_AC_PROFILE="performance"
+DEFAULT_BATTERY_PROFILE="balanced"
+DEFAULT_LOW_PROFILE="power-saver"
+DEFAULT_WARNING_LEVEL="3"
+DEFAULT_LID_CLOSE_ON_BATTERY="suspend"
+DEFAULT_LID_CLOSE_ON_AC="suspend"
 
 config_detect_format() {
     local file="$1" line
