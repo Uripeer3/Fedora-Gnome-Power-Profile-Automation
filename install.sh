@@ -78,6 +78,15 @@ install_files() {
     normalize_config_permissions
 }
 
+activate_service() {
+    systemctl daemon-reload
+    systemctl enable "${APP}.service"
+    # `enable --now` does not restart an already-running service. An explicit
+    # restart guarantees that upgrades use the newly installed runtime and
+    # configuration immediately.
+    systemctl restart "${APP}.service"
+}
+
 main() {
     while (( $# > 0 )); do
         case "$1" in
@@ -106,8 +115,7 @@ main() {
         "$COMMAND_DEST" sync-lid-policy
     fi
 
-    systemctl daemon-reload
-    systemctl enable --now "${APP}.service"
+    activate_service
 
     printf '\nInstalled %s.\n' "$APP"
     printf 'Configure: sudo %s configure\n' "$APP"
@@ -115,4 +123,6 @@ main() {
     printf 'Logs:      journalctl -u %s.service -f\n' "$APP"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
