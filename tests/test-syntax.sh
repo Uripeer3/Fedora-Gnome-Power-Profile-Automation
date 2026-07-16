@@ -43,4 +43,73 @@ else
   printf 'shellcheck not installed; skipped static lint.\n'
 fi
 
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+test_configure_restarts_active_monitor() (
+  # shellcheck source=../src/gnome-power-profile-automation
+  source "$root_dir/src/gnome-power-profile-automation"
+
+  local -a calls=()
+  systemctl() {
+    calls+=("$*")
+    return 0
+  }
+
+  restart_monitor_if_active >/dev/null
+
+  [[ "${calls[0]:-}" == "is-active --quiet ${APP}.service" ]] \
+    || fail "Expected an active-service check before refreshing configuration."
+  [[ "${calls[1]:-}" == "restart ${APP}.service" ]] \
+    || fail "Expected the active monitor to be restarted."
+  (( ${#calls[@]} == 2 )) \
+    || fail "Unexpected systemctl calls while refreshing configuration."
+)
+
+test_configure_leaves_inactive_monitor_stopped() (
+  # shellcheck source=../src/gnome-power-profile-automation
+  source "$root_dir/src/gnome-power-profile-automation"
+
+  local -a calls=()
+  systemctl() {
+    calls+=("$*")
+    [[ "$1" != "is-active" ]]
+  }
+
+  restart_monitor_if_active >/dev/null
+
+  [[ "${calls[0]:-}" == "is-active --quiet ${APP}.service" ]] \
+    || fail "Expected an inactive-service check."
+  (( ${#calls[@]} == 1 )) \
+    || fail "An inactive monitor must not be started by configure."
+)
+
+test_install_restarts_installed_runtime() (
+  # shellcheck source=../install.sh
+  source "$root_dir/install.sh"
+
+  local -a calls=()
+  systemctl() {
+    calls+=("$*")
+  }
+
+  activate_service
+
+  [[ "${calls[0]:-}" == "daemon-reload" ]] \
+    || fail "Expected systemd units to be reloaded first."
+  [[ "${calls[1]:-}" == "enable ${APP}.service" ]] \
+    || fail "Expected the service to be enabled."
+  [[ "${calls[2]:-}" == "restart ${APP}.service" ]] \
+    || fail "Expected installation and upgrades to restart the service."
+  (( ${#calls[@]} == 3 )) \
+    || fail "Unexpected systemctl calls while activating the service."
+)
+
+test_configure_restarts_active_monitor
+test_configure_leaves_inactive_monitor_stopped
+test_install_restarts_installed_runtime
+printf 'service refresh tests OK\n'
+
 rm -f "$report_file"
