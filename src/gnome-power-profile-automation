@@ -239,6 +239,16 @@ sync_lid_policy() {
     success "Applied lid-close policy: battery=$(lid_action_label "$LID_CLOSE_ON_BATTERY"), AC=$(lid_action_label "$LID_CLOSE_ON_AC")"
 }
 
+restart_monitor_if_active() {
+    require_command systemctl
+
+    if systemctl is-active --quiet "${APP}.service"; then
+        systemctl restart "${APP}.service" \
+            || die "Configuration was saved, but the running power-profile monitor could not be restarted."
+        success "Restarted the power-profile monitor with the new configuration."
+    fi
+}
+
 write_config() {
     local ac="$1" battery="$2" low="$3" warning="$4" lid_battery="$5" lid_ac="$6" temporary
     validate_profile "$ac"
@@ -470,6 +480,7 @@ configure() {
             "$DEFAULT_LID_CLOSE_ON_BATTERY" \
             "$DEFAULT_LID_CLOSE_ON_AC"
         sync_lid_policy
+        restart_monitor_if_active
         success "Configured recommended defaults in $CONFIG"
         return
     fi
@@ -519,6 +530,7 @@ configure() {
         y|Y|yes|YES)
             write_config "$ac" "$battery" "$low" "$warning" "$lid_battery" "$lid_ac"
             sync_lid_policy
+            restart_monitor_if_active
             success "Configuration saved to $CONFIG"
             ;;
         *) info "Cancelled. No configuration changes were made." ;;
@@ -555,4 +567,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
